@@ -29,13 +29,26 @@ A platform for organizing badminton get-togethers — venue discovery, skill-mat
 
 ## Getting Started
 
+**Prerequisites:** Node ≥ 22, Docker (for Supabase local dev)
+
 ```bash
-cd src
-npm install
-npm run dev
+# 1. Install dependencies
+cd src && npm install
+
+# 2. Start local Supabase (Postgres + Auth + Studio)
+cd .. && supabase start
+# Copy the printed anon key and service role key into the env files below
+
+# 3. Set up environment variables
+cp src/client/.env.example src/client/.env.local
+cp src/server/.env.example src/server/.env.local
+# Fill in the values from step 2
+
+# 4. Start the app
+cd src && npm run dev
 ```
 
-Client runs on `http://localhost:3000`, server on `http://localhost:4000`.
+Client runs on `http://localhost:3000`, server on `http://localhost:4000`, Supabase Studio on `http://localhost:54323`.
 
 ## Stack
 
