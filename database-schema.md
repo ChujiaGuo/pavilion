@@ -28,6 +28,7 @@ See `technical-notes.md` for lookup logic, derivation formulas, and access contr
 | `reliability_score` | numeric(5,2) | default 100 |
 | `placement_sessions_remaining` | integer | default 3 |
 | `session_count` | integer | default 0 |
+| `deleted_at` | timestamptz | nullable. Soft delete — null means active. |
 | `created_at` | timestamptz | |
 
 ---
