@@ -50,6 +50,26 @@ cd src && npm run dev
 
 Client runs on `http://localhost:3000`, server on `http://localhost:4000`, Supabase Studio on `http://localhost:54323`.
 
+## Database migrations
+
+```bash
+supabase migration new <name>   # create supabase/migrations/<timestamp>_<name>.sql
+supabase db reset               # reset local DB and replay all migrations (smoke test)
+supabase db push                # apply pending migrations to the linked prod project
+```
+
+Migrations live in `supabase/migrations/` and are committed to git. `db push` only runs migrations not yet applied to the remote — safe to run repeatedly.
+
+## Production setup (one-time)
+
+1. Create a Supabase cloud project at supabase.com
+2. `supabase link --project-ref <your-project-ref>`
+3. `supabase db push` — applies all migrations to prod for the first time
+4. Add prod env vars to the Railway/Render dashboard (see `.env.example` files for the full list)
+5. Connect the repo to Railway/Render — it auto-deploys on push to `main`
+
+Prod env vars never go in files — hosting dashboard only.
+
 ## Stack
 
 | Layer | Choice |

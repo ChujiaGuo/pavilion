@@ -103,6 +103,26 @@ True microservices from day one add significant operational overhead (API gatewa
 
 ---
 
+## Environments
+
+Two environments: local dev (Supabase CLI) and prod (Supabase cloud + Railway/Render).
+
+**Local dev:** `supabase start` spins up a full Postgres + Auth + Studio stack in Docker. URLs and keys are printed on startup — copy them into `src/client/.env.local` and `src/server/.env.local`. These files are gitignored.
+
+**Prod:** env vars live in the Railway/Render dashboard only, never in files. The prod Supabase project is linked once via `supabase link --project-ref <ref>`.
+
+**Migration workflow:**
+1. `supabase migration new <name>` — scaffolds `supabase/migrations/<timestamp>_<name>.sql`
+2. Write the SQL, then `supabase db reset` to replay all migrations locally and verify
+3. Commit the migration file
+4. `supabase db push` — applies pending migrations to the linked prod project
+
+The remote tracks applied migrations in a `supabase_migrations` table — `db push` is idempotent and safe to run repeatedly.
+
+**App deployment:** Railway/Render watches the repo and auto-deploys on push to `main`. No separate deploy step.
+
+---
+
 ## Database Logic
 
 **Venue availability lookup (two-step):**
