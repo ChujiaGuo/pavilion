@@ -1,4 +1,4 @@
-# Sports Get-Together App — Brainstorm Notes
+# Pavilion — Brainstorm Notes
 
 _Last updated: 2026-06-28_
 
@@ -27,7 +27,6 @@ Drop-in badminton in the US is unstructured: mismatched skill levels, uncoordina
 - Drop-in availability vs. reservation required
 - Number of courts, surface type (synthetic mat, wood, concrete — matters for safety/play)
 - Shuttle type used (feather vs. plastic — club vs. casual)
-- Typical skill level of attendees
 - Contact info + direct booking link (players book with the venue themselves — we don't handle the transaction)
 - User reviews and photos
 
@@ -35,15 +34,12 @@ Drop-in badminton in the US is unstructured: mismatched skill levels, uncoordina
 
 **Two types of sessions:**
 - *Free drop-in* (rec center open play, etc.): no money changes hands through the app. Primary purpose is coordination — players can see who's planning to attend, group themselves by skill, and show up knowing who's there. Booking with the venue is still handled independently.
-- *Paid/private rental* (organizer rented the space): attendees pay upfront or leave a deposit through the app. Cancellations must be made at least 12 hours in advance for a refund; no-shows forfeit payment. Organizer is protected since they're on the hook for the court fee.
+- *Paid/private rental* (organizer rented the space): the app is still coordination-only — no in-app payments in v1. Organizer collects however they prefer (cash, Venmo, etc.). Commitment is enforced socially via the reliability score — enough no-shows and a player is blocked from paid sessions.
 
 **Shuttle cost:**
 - Standard rule of thumb: ~1 tube (12 birds) per 12 players per hour
-- *Paid sessions*: shuttle cost is baked into the session price upfront. App can calculate suggested per-person shuttle contribution based on headcount and session length.
-- *Free drop-ins*: up to the organizer. Options:
-  - Collect shuttles from participants at the start (each person brings X birds)
-  - Same split-cost model as paid sessions, collected informally
-  - Organizer specifies shuttle policy when posting the session
+- App auto-calculates and displays a suggested per-person shuttle contribution when the organizer sets up the session (player count × duration → tube count → cost split). Informational only — no in-app payment collected.
+- Organizer specifies shuttle policy when posting: bring your own, split cost, or provided. For free drop-ins, organizer can also collect birds from participants at the start.
 
 **Session options:**
 - Format: casual rotation, king of the court, round robin (organizer picks)
@@ -51,13 +47,9 @@ Drop-in badminton in the US is unstructured: mismatched skill levels, uncoordina
 - Court count drives max capacity: e.g. 3 courts = 12 players (or up to 16 with rotation)
 - Recurring sessions: weekly/biweekly repeat so organizers don't re-post manually
 
-**Cancellation policy refinement:**
-- 12-hour window is measured from session start time (clean, easy to communicate)
-- If a cancelled spot is filled from the waitlist, the cancelling player gets their fee refunded — much friendlier UX and reduces signup friction overall
-
-**Shuttle cost as a smart feature:**
-- App knows player count and session duration, so it can auto-calculate and suggest the shuttle fee per person when the organizer sets pricing (1 tube / 12 players / hour)
-- Small but genuinely badminton-specific touch that builds credibility with the community
+**Cancellation policy:**
+- 12-hour window measured from session start time — cancel before that and your reliability score is unaffected; cancel after (or no-show) and it counts against you
+- Waitlist fills spots automatically when someone drops out
 
 **Free drop-in as the habit-forming entry point:**
 - Highest-volume use case; builds the daily/weekly habit that makes ratings and marketplace valuable
@@ -70,28 +62,16 @@ Drop-in badminton in the US is unstructured: mismatched skill levels, uncoordina
 - Banner or card ads within the venue detail page
 - Low friction for venues — just pay for visibility, no integration required
 
-**Open questions:**
-- Who maintains venue data? User-submitted + admin-verified? Partner with venues directly?
-- How do we handle unofficial venues (someone's church gym, school gymnasium)? → The session organizer posts it directly. If they rented the space, they own the session — others join and coordinate with them, not the venue.
-- Do we deep-link to a venue's own booking page, or just show their phone/website?
+**Venue data maintenance:**
+- Two venue types: clubs/dedicated courts (stable hours) and rec centers (specific scheduled times). Both can be listed.
+- **Venue account type:** venues can claim their listing and manage their own hours directly.
+- **Suggest an edit:** any user can flag incorrect info. If enough edits are suggested for a venue that hasn't claimed its listing, the venue is notified and prompted to take ownership.
+- Unofficial venues (church gym, school gymnasium): the session organizer posts it directly — they own the session, not the venue. No venue listing needed.
+- Venue detail pages show contact info + direct booking link (phone/website). We don't deep-link into external booking systems.
 
 ---
 
 ### 2. Skill Rating System
-
-**Scale: 1–8 (+ 8+ category)**
-
-| Level | Description |
-|-------|-------------|
-| 1 | Complete beginner — never played or just learning rules |
-| 2 | Beginner — can rally, knows basic rules |
-| 3 | Recreational — consistent rallies, basic serves, learning footwork |
-| 4 | Intermediate-low — developing footwork, can smash, plays in casual leagues |
-| 5 | Intermediate-high — competitive club level, tactical awareness |
-| 6 | Advanced — strong league player, consistent in all strokes |
-| 7 | Elite amateur — national juniors, college varsity, state/regional champions |
-| 8 | National/international competitive — BWF circuit, national team level |
-| 8+ | Top 100 BWF ranked professionals |
 
 **Onboarding / initial rating:**
 - Self-reported via a short quiz: highest level played, strongest opponents faced, competitive history, frequency of play, self-assessed weaknesses
@@ -146,7 +126,7 @@ Expanding to 10 (from the original 8) gives meaningful separation in the advance
 
 **Rating locks and verification gates:**
 - **Pro floor (grades 8–10):** once a player is verified at pro level, their rating has a hard floor — they can never drop below advanced club level (grade 6.0) regardless of peer ratings. An off-session or playing down shouldn't erase a career of elite play.
-- **Pro ceiling gate:** organic peer ratings alone cannot push a player into grades 8+. Reaching the pro tier requires external verification — e.g., BWF player ID, documented tournament results, national ranking, or club/coach endorsement. This prevents friend-group inflation from manufacturing fake pros.
+- **Pro ceiling gate:** organic peer ratings alone cannot push a player into grade 8 or above. Reaching the pro tier requires external verification — e.g., BWF player ID, documented tournament results, national ranking, or club/coach endorsement. This prevents friend-group inflation from manufacturing fake pros.
 - **Unverified ceiling:** players without verification cap out at the top of grade 7 (elite amateur). They can be excellent, but "pro" is a verified status.
 - Verification is a one-time process per tier; once granted, the floor locks in permanently (even if the player is inactive for years)
 - **Verification prompt UX:** a player who organically reaches the 7.75–7.99 range should be prompted in-app to submit verification credentials — otherwise they hit an invisible ceiling with no path forward. The prompt should explain what verification requires and what unlocks.
@@ -181,55 +161,61 @@ Expanding to 10 (from the original 8) gives meaningful separation in the advance
 
 ---
 
-## Marketplace (Deferred)
+## User Profiles
 
-Keep in mind for future integration — do not build in v1. Architecture should be modular enough to add without major rework. See `technical-notes.md` for relevant architectural flags.
+**Core identity:**
+- Display name, photo, location (city/region level — not exact address)
+- Rating grade + subtier (shown as label, not raw number)
+- Verified badge if pro-tier verified
+- Preferred format (singles, doubles, mixed doubles)
+- Preferred play style / session type (competitive, social, training)
 
-Core concept: local pro shops list inventory (rackets, shuttlecocks, strings, shoes, apparel), real-time stock, local pickup, commission model, string job bookings.
+**Credibility signals:**
+- Session history — how many sessions attended, reliability score (show/no-show rate)
+- How long they've been on the platform
+- Rating shown as current grade + subtier only — no trajectory direction displayed. Showing a declining trajectory would discourage others from playing with someone and undermine fair access. Everyone gets a fair chance.
+- Sportsmanship/reliability score separate from skill rating (ties into the no-show concern)
+
+**Discovery / social:**
+- Venues they frequent (so others can find regular players at their spot)
+- Upcoming sessions they're attending (if opted into public)
+- Ability to follow players — useful for "I want to know when this person is playing next"
+
+**Privacy — default private, opt-in public:**
+- All profile fields default to private (visible only to people who've shared a session)
+- Players opt in to making their profile, session attendance, and venue activity publicly visible
+- Location is always city/region level maximum — never exact
+
+**Messaging:**
+- v1: session-scoped group chat only (organizer + attendees). Bounded by session context, avoids open DM moderation surface area.
+- Built on a third-party service (Stream Chat preferred — see technical notes) rather than from scratch
+- Direct player-to-player messaging is a future feature
 
 ---
 
-## Platform
+## Marketplace (Deferred — not in v1)
 
-- **v1:** Responsive web app with a well-designed mobile form factor — not a native app, but should feel natural on mobile
-- **Future:** Dedicated iOS/Android app once the product is validated
-
----
-
-### 3. Marketplace
+Do not build in v1. Architecture should be modular enough to add without major rework. See `technical-notes.md` for relevant architectural flags.
 
 **Problem it solves:** Pro shop inventory in the US is inconsistent and hard to find. Players often don't know what's locally available.
 
 **Features:**
 - Local pro shops list their inventory (rackets, shuttlecocks, shoes, strings, grips, bags, apparel)
 - Real-time or near-real-time stock status
-- Local pickup or local shipping option
-- Commission model: app takes % of each transaction
-- String job bookings (extremely common need — most serious players restring frequently)
-- Racket demo/rental programs (shops can offer try-before-you-buy)
+- Local pickup or local shipping
+- Commission model: app takes % of each transaction (e.g., 8–12%)
+- String job bookings (extremely common — serious players restring frequently)
+- Racket demo/rental programs (try-before-you-buy)
 
-**Monetization:** Commission per sale (e.g., 8–12%), premium shop listings for featured placement.
+**Differentiation from Amazon:** local availability + community trust + specialist expertise. Not competing on commodity items — competing on the experience and the relationship.
 
 **Open questions:**
 - Do we handle payments in-app or redirect to shop's own checkout?
-- Shipping logistics — do we become a fulfillment layer or just a discovery layer?
-- How do we compete with Amazon for commodity items (grips, shuttles)? Angle: local availability + expertise + community trust.
+- Fulfillment layer or discovery layer?
 
 ---
 
 ## Additional Features (Future)
-
-### Session Organization
-- Create a session: pick venue, date/time, format (casual, competitive, training), skill range requirement
-- Invite specific players or open it publicly
-- Fill spots via waitlist
-- Session chat
-- Post-session rating prompts
-
-### Community / Social
-- Player profiles: stats, ratings history, venues frequented, gear used
-- Follow players, see upcoming sessions they're attending
-- Kudos/endorsements for sportsmanship
 
 ### Leagues & Tournaments
 - Organize ladder leagues within a venue or city
@@ -239,6 +225,16 @@ Core concept: local pro shops list inventory (rackets, shuttlecocks, strings, sh
 ### Coach Discovery
 - Verified coaches list their rates, availability, specialties
 - Book lessons through the app
+- Coach verification would tie into the existing rating/verification system
+
+### Direct Messaging
+- Player-to-player DMs (v1 only has session-scoped group chat)
+
+### In-App Payments for Paid Sessions
+- Platform escrow model: collect payment at RSVP, hold until session, release to organizer
+- Requires Stripe Connect (Express accounts) — organizers onboard with identity + banking info
+- Forfeited deposits on late cancel/no-show go to organizer automatically
+- Waitlist spot-transfer: canceller retains their payment, waitlister pays canceller directly for the spot
 
 ---
 
@@ -246,11 +242,10 @@ Core concept: local pro shops list inventory (rackets, shuttlecocks, strings, sh
 
 | Revenue Stream | Notes |
 |---|---|
-| Marketplace commission | Primary long-term revenue |
-| Club/venue advertising | Featured placement, sponsored session posts — no booking integration needed |
+| Marketplace commission | Primary long-term revenue (deferred) |
+| Club/venue advertising | Featured placement, sponsored session posts — low friction, no booking integration needed |
 | Premium player subscriptions | Advanced analytics, priority session access |
 | Club/organization subscriptions | Admin tools, league management, branding |
-| Featured placement in venue/shop listings | Low-friction ad product |
 
 ---
 
@@ -268,16 +263,21 @@ Core concept: local pro shops list inventory (rackets, shuttlecocks, strings, sh
 - **Cold start on ratings** — system has no value until enough players are rated
 - **Geographic density** — thin in areas without badminton culture
 - **Rating gaming / social dynamics** — friend groups inflating each other, revenge downvoting
-- **Venue data staleness** — hours change, courts close; needs a maintenance loop
+- **Venue data staleness** — hours change, courts close. Partially mitigated by venue account type (venues manage their own data) and suggest-an-edit flow, but requires ongoing attention
 - **Competing with established apps** — Meetup, Facebook Groups, SportEasy are used informally now; differentiation must be clear
 
 ---
 
-## Open Questions / Next Steps
+## MVP Scope (v1)
+
+- Venue discovery (map, listing, venue accounts, suggest-an-edit)
+- Session creation and RSVPs (free drop-in + organizer-hosted — no in-app payments)
+- User profiles (rating, reliability score, privacy controls)
+- Skill rating system (placement, peer ratings, locks, verification gate)
+- Session-scoped group chat (Stream Chat)
+
+## Open Questions
 
 - [ ] What cities/regions are the target launch markets?
-- [ ] Mobile-first (iOS/Android) or web first?
-- [ ] Do we build venue data from scratch or scrape/partner for initial data?
-- [ ] What does MVP look like? (Probably: venue list + session creation + basic profiles, no marketplace yet)
-- [ ] How does the skill level quiz work for onboarding?
-- [ ] Potential to expand to other racket sports later (pickleball, squash, tennis)?
+- [ ] How is venue data seeded at launch — manual entry, community sourcing, or outreach to clubs?
+- [ ] Expand to other racket sports eventually (pickleball, squash, tennis)?
