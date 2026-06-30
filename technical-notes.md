@@ -26,7 +26,7 @@ See `database-schema.md` for the full table definitions.
 | Backend | Node.js + Hono (separate service) | TypeScript-first, significantly faster than Express, minimal bundle (~14kb), clean modern API — chosen over Express which has weak native TS support and slow project velocity |
 | Database + Auth | Supabase (PostgreSQL) | See Supabase vs Firebase below |
 | Messaging | Stream Chat | Pre-built React components, handles realtime/push/storage |
-| Payments | Stripe | Handles paid sessions now, marketplace transactions later — one provider for both |
+| Payments | Stripe | Deferred to v2 (see brainstorm.md Future Features Roadmap) — chosen now so the same provider can later handle both paid sessions and marketplace transactions |
 | Hosting | Railway or Render | Low ops overhead, managed Postgres option, easy to start |
 
 ---
@@ -57,15 +57,17 @@ True microservices from day one add significant operational overhead (API gatewa
 
 | Domain | Responsibility |
 |---|---|
-| `user` | Auth, profiles, privacy settings, verification status |
+| `user` | Auth, profiles, privacy settings, verification |
 | `venue` | Listings, geospatial search, discovery |
-| `session` | Creation, RSVPs, scheduling, payments, shuttle calc |
+| `session` | Creation, RSVPs, scheduling. *(Payments and shuttle cost auto-calc are deferred — see brainstorm.md Future Features Roadmap.)* |
 | `rating` | Score calculation, history, locks, anomaly detection |
-| `messaging` | Group chat (thin wrapper over Stream Chat) |
-| `marketplace` | Future — extract as true microservice when built |
+| `messaging` | Thin wrapper over Stream Chat (session-scoped group chat) |
+| `marketplace` | Stub only, fully deferred — don't implement or reference from other domains |
+
+This is the single canonical copy of this table — `README.md` and `CLAUDE.md` reference it rather than duplicating it.
 
 - **Modular from the start** — marketplace is deferred but must be addable without reworking core. Keep shop/inventory/payment concerns as a clearly bounded domain stub, even if the code doesn't exist yet.
-- **No booking transactions in v1** — the app is a coordination layer. No payment flows for venue bookings; only payment flow is for paid (organizer-hosted) sessions.
+- **No booking transactions in v1** — the app is a coordination layer. No payment flows for venue bookings or for paid (organizer-hosted) sessions; those are deferred to v2 (see brainstorm.md Future Features Roadmap). Organizers collect payment externally.
 
 ---
 
@@ -136,13 +138,7 @@ Two environments: local dev (Supabase CLI) and prod (Supabase cloud + Railway/Re
 
 **Prod:** env vars live in the Railway/Render dashboard only, never in files. The prod Supabase project is linked once via `supabase link --project-ref <ref>`.
 
-**Migration workflow:**
-1. `supabase migration new <name>` — scaffolds `supabase/migrations/<timestamp>_<name>.sql`
-2. Write the SQL, then `supabase db reset` to replay all migrations locally and verify
-3. Commit the migration file
-4. `supabase db push` — applies pending migrations to the linked prod project
-
-The remote tracks applied migrations in a `supabase_migrations` table — `db push` is idempotent and safe to run repeatedly.
+**Migration workflow:** see README.md "Database migrations" for the full command sequence.
 
 **Data API grants:** newly created tables aren't auto-exposed to Data API roles by default (`config.toml`'s `auto_expose_new_tables`, off by default — matches the cloud default, and the flag itself is slated for removal). Without an explicit `GRANT`, even `service_role` gets "permission denied" on a brand-new table via `supabase-js`/PostgREST — confirmed against a live local instance. `20260630160450_grant_service_role_access.sql` grants `service_role` access on the schema as it stood at that point, plus `ALTER DEFAULT PRIVILEGES` so future tables inherit it automatically — any new table added via a later migration doesn't need its own grant.
 
@@ -174,8 +170,6 @@ The remote tracks applied migrations in a `supabase_migrations` table — `db pu
 
 **Rating display derivation:** see "Rating System" above for the full formula, clamping, and label format (`toRatingDisplay` in `rating.service.ts`). Always computed server-side from `internal_score` — never expose the raw float to the client.
 
-**Shuttle cost per person — not yet implemented:** see "Shuttle cost calculation" under Session & Venue below for the formula. `session.router.ts` is currently a stub with no service file, so nothing computes this yet.
-
 **Admin access check:** not an RLS policy (none exist in this schema — see "Row Level Security" above). Enforced in service-layer code via `isAdmin()` (`venue.service.ts`): a plain `select user_id from admins where user_id = :userId`. Follow this pattern — a service-layer query, not a DB policy — for any new admin-gated write.
 
 **Verification approval action:** on approving a `verification_requests` row, write `verified_tier` and `rating_floor` to the corresponding `profiles` row. `rating_floor` is set to 6.0 regardless of the tier granted (pro floor per product rules).
@@ -194,17 +188,9 @@ The remote tracks applied migrations in a `supabase_migrations` table — `db pu
 - 12-hour cancellation window measured from session start time.
 - Waitlist fills dropped spots automatically.
 
-**Future: in-app payments via Stripe Connect**
-- Stripe Connect Express accounts for organizers — money flows attendee → organizer, platform takes fee via `application_fee_amount`
-- Only trigger Stripe onboarding when organizer first creates a paid session, not at signup
-- Do NOT build payment infrastructure in v1 — validate session feature first
+In-app payments (Stripe Connect) and shuttle cost auto-calculation are both deferred — see brainstorm.md's Future Features Roadmap for the design detail.
 
-**Shuttle cost calculation (not yet implemented — `session` domain is still a router-only stub):**
-- Formula: `tubes_needed = ceil((player_count / 12) * hours)`
-- `shuttle_fee_per_person = (tubes_needed * tube_price) / player_count`
-- Organizer inputs tube price (varies by brand/feather vs. plastic); app suggests the per-person fee
-
-**Skill range enforcement (asymmetric):**
+**Skill range enforcement (asymmetric) — not yet implemented, `session` domain is still a router-only stub:**
 - Session range stored as `[min_grade, max_grade]` in decimal
 - Organizer's own rating must be within ~1.5 grades of at least one end of the range they set
 - Player join check is directional:
@@ -223,12 +209,3 @@ The remote tracks applied migrations in a `supabase_migrations` table — `db pu
 - Alternatives: Firebase Realtime Database (more custom UI work, very cheap), Sendbird (more enterprise, pricier)
 - **Channel ID convention:** Stream channel IDs are derived as `session_{session_id}`. No `stream_channel_id` column on `sessions` — the ID is always reconstructible from the session UUID, so there's nothing to store or sync.
 - DM system is a future feature — keep the messaging domain cleanly separated from session domain so it can be extended
-
----
-
-## Marketplace (Deferred — Architecture Flags Only)
-
-- Treat as a separate bounded domain: `shop`, `inventory`, `listing`, `order`, `commission`
-- Do not reference these concepts in `session`, `venue`, or `user` domain models
-- When building user profiles, leave a clean extension point for "affiliated shop" without building it
-- Payment infrastructure added for paid sessions (above) should be reusable for marketplace transactions later — choose a payment provider (e.g., Stripe) that handles both person-to-person and commerce flows

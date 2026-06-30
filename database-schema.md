@@ -1,6 +1,6 @@
 # Database Schema
 
-_Last updated: 2026-06-30 (added `venues.lng`/`lat` generated columns; added `service_role` schema GRANTs — see technical-notes.md "Environments")_
+_Last updated: 2026-06-30 (added `venues.lng`/`lat` generated columns; added `service_role` schema GRANTs — see technical-notes.md "Environments"; corrected `internal_score`'s range)_
 
 PostgreSQL via Supabase. PostGIS extension enabled.
 
@@ -22,7 +22,7 @@ See `technical-notes.md` for lookup logic, derivation formulas, and access contr
 | `preferred_formats` | text[] | `'singles'`, `'doubles'`, `'mixed'` |
 | `play_style` | text | `'competitive'`, `'social'`, `'training'` |
 | `privacy_level` | text | `'private'`, `'public'` — default `'private'` |
-| `internal_score` | numeric(5,2) | 1.00–10.50+ |
+| `internal_score` | numeric(5,2) | 1.00–10+, intentionally unbounded above 10 (elite tier has no ceiling) |
 | `verified_tier` | integer | nullable |
 | `rating_floor` | numeric(5,2) | nullable |
 | `reliability_score` | numeric(5,2) | default 100 |

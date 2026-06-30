@@ -38,8 +38,8 @@ Drop-in badminton in the US is unstructured: mismatched skill levels, uncoordina
 
 **Shuttle cost:**
 - Standard rule of thumb: ~1 tube (12 birds) per 12 players per hour
-- App auto-calculates and displays a suggested per-person shuttle contribution when the organizer sets up the session (player count × duration → tube count → cost split). Informational only — no in-app payment collected.
 - Organizer specifies shuttle policy when posting: bring your own, split cost, or provided. For free drop-ins, organizer can also collect birds from participants at the start.
+- Auto-calculating and displaying a suggested per-person shuttle contribution (player count × duration → tube count → cost split) is deferred — see Future Features Roadmap. v1 just stores the policy and an organizer-entered tube price; no computed suggestion yet.
 
 **Session options:**
 - Format: casual rotation, king of the court, round robin (organizer picks)
@@ -156,9 +156,7 @@ Expanding to 10 (from the original 8) gives meaningful separation in the advance
 - System calibration should anchor "average active user" around grade 3.5–4.5
 - The subtier system should feel meaningful in the 3–6 range where most movement happens
 
-**Open questions:**
-- Regional calibration — a "4.5" in a major metro badminton hub may differ from a "4.5" in a smaller market; worth flagging or adjusting for eventually
-- Separate singles vs. doubles rating? (a great singles player isn't always a great doubles player) — probably a v2 feature
+Regional rating calibration and separate singles/doubles ratings are both deferred — see Future Features Roadmap.
 
 ---
 
@@ -194,9 +192,9 @@ Expanding to 10 (from the original 8) gives meaningful separation in the advance
 
 ---
 
-## Marketplace (Deferred — not in v1)
+## Marketplace (Deferred — fully deferred feature, version TBD)
 
-Do not build in v1. Architecture should be modular enough to add without major rework. See `technical-notes.md` for relevant architectural flags.
+Do not build in v1. Architecture should be modular enough to add without major rework — see `CLAUDE.md`'s domain-boundary rule (don't add marketplace concepts to `session`/`venue`/`user`, even as optional fields).
 
 **Problem it solves:** Pro shop inventory in the US is inconsistent and hard to find. Players often don't know what's locally available.
 
@@ -210,32 +208,34 @@ Do not build in v1. Architecture should be modular enough to add without major r
 
 **Differentiation from Amazon:** local availability + community trust + specialist expertise. Not competing on commodity items — competing on the experience and the relationship.
 
+**Architecture considerations for when this gets built:**
+- When building user profiles, leave a clean extension point for "affiliated shop" without building it now
+- The payment provider chosen for in-app session payments (see Future Features Roadmap) should be reusable for marketplace transactions later — pick one (e.g., Stripe) that handles both person-to-person and commerce flows, rather than bolting on a second provider when marketplace gets built
+
 **Open questions:**
 - Do we handle payments in-app or redirect to shop's own checkout?
 - Fulfillment layer or discovery layer?
 
 ---
 
-## Additional Features (Future)
+## Future Features Roadmap
 
-### Leagues & Tournaments
-- Organize ladder leagues within a venue or city
-- Round-robin tournament bracket tool
-- Club admins can manage rosters and schedules
+Everything not in MVP Scope (v1) below lives here. `technical-notes.md` only documents implemented features and features ready to be built in the current version — anything deferred gets tracked here instead, with a version once one's assigned.
 
-### Coach Discovery
-- Verified coaches list their rates, availability, specialties
-- Book lessons through the app
-- Coach verification would tie into the existing rating/verification system
-
-### Direct Messaging
-- Player-to-player DMs (v1 only has session-scoped group chat)
-
-### In-App Payments for Paid Sessions
-- Platform escrow model: collect payment at RSVP, hold until session, release to organizer
-- Requires Stripe Connect (Express accounts) — organizers onboard with identity + banking info
-- Forfeited deposits on late cancel/no-show go to organizer automatically
-- Waitlist spot-transfer: canceller retains their payment, waitlister pays canceller directly for the spot
+| Feature | Description | Version |
+|---|---|---|
+| In-app payments for paid sessions | Platform escrow model: collect payment at RSVP, hold until session, release to organizer. Requires Stripe Connect (Express accounts) — organizers onboard with identity + banking info. Forfeited deposits on late cancel/no-show go to organizer automatically. Waitlist spot-transfer: canceller retains their payment, waitlister pays canceller directly for the spot. | v2 |
+| Shuttle cost auto-calculation | Suggested per-person shuttle contribution computed from player count × duration → tube count → cost split (`tubes_needed = ceil((player_count / 12) * hours)`, `shuttle_fee_per_person = (tubes_needed * tube_price) / player_count`). Informational only, no in-app payment. v1 still has the raw `shuttle_policy`/`shuttle_tube_price` fields — only the computed suggestion is deferred. | TBD |
+| Marketplace | Full commerce platform — see dedicated section below. | TBD |
+| Leagues & Tournaments | Ladder leagues within a venue or city, round-robin bracket tool, club admins manage rosters/schedules. | TBD |
+| Coach Discovery | Verified coaches list rates/availability/specialties, book lessons in-app, coach verification ties into the existing rating/verification system. | TBD |
+| Direct Messaging | Player-to-player DMs (v1 only has session-scoped group chat). | TBD |
+| Follower graph | Follow players to know when they're playing next. | TBD |
+| Singles vs. doubles separate rating | A great singles player isn't always a great doubles player — separate ratings per format. (Previously noted as "probably v2" — unconfirmed.) | TBD |
+| Regional rating calibration | A "4.5" in a major metro badminton hub may differ from a "4.5" in a smaller market. | TBD |
+| Global rating distribution recalibration | Periodic admin/cron job to correct distribution drift (e.g. grade inflation) if it occurs over time. Not part of the live per-vote scoring path. | TBD |
+| Coordinated voting / anomaly batch detection | Same rater-ratee pair exceeding N sessions without fresh raters in between, coordinated voting pattern detection across accounts. Needs batch/cron analysis, not per-request logic. Partially mitigated today by the recency-adjusted familiarity weight, but not flagged. | TBD |
+| Venue edit-suggestion auto-notify | If enough edits are suggested for a venue that hasn't claimed its listing, notify the venue and prompt them to take ownership. `submitEditSuggestion` currently just inserts a row — no threshold or notification logic exists yet. | TBD |
 
 ---
 

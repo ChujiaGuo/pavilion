@@ -8,23 +8,21 @@ A platform for organizing badminton get-togethers — venue discovery, skill-mat
 
 ```
 /
-├── brainstorm.md        # Product brainstorming notes and feature decisions
-├── technical-notes.md   # Architecture decisions, stack rationale, technical specs
-├── database-schema.md   # Full database table definitions and indexes
-└── src/                 # Application code (Pavilion)
-    ├── package.json     # Monorepo root — npm workspaces
+├── CLAUDE.md             # Instructions for Claude Code when working in this repo
+├── brainstorm.md         # Product brainstorming notes, feature decisions, future features roadmap
+├── technical-notes.md    # Architecture decisions, stack rationale, technical specs
+├── database-schema.md    # Full database table definitions and indexes
+├── supabase/
+│   └── migrations/       # SQL migrations, committed to git — see "Database migrations" below
+└── src/                  # Application code (Pavilion)
+    ├── package.json      # Monorepo root — npm workspaces
     ├── packages/
-    │   └── types/       # @pavilion/types — shared TypeScript types used by client and server
-    ├── client/          # @pavilion/client — Next.js frontend (TypeScript, Tailwind)
-    └── server/          # @pavilion/server — Node/Hono backend (TypeScript)
+    │   └── types/        # @pavilion/types — shared TypeScript types used by client and server
+    ├── client/            # @pavilion/client — Next.js frontend (TypeScript, Tailwind)
+    └── server/            # @pavilion/server — Node/Hono backend (TypeScript)
         └── src/
-            └── domains/
-                ├── user/        # Auth, profiles, privacy, verification
-                ├── venue/       # Venue listings, geospatial search, discovery
-                ├── session/     # Session creation, RSVPs, scheduling
-                ├── rating/      # Skill rating calculation, history, locks
-                ├── messaging/   # Session-scoped group chat (Stream Chat integration)
-                └── marketplace/ # Stub only — deferred to future version
+            ├── domains/    # user, venue, session, rating, messaging, marketplace — see technical-notes.md "Architecture" for responsibilities
+            └── __integration__/, test/  # Integration tests + fixtures against real Postgres — see "Testing" below
 ```
 
 ## Getting Started
@@ -60,6 +58,15 @@ supabase db push                # apply pending migrations to the linked prod pr
 
 Migrations live in `supabase/migrations/` and are committed to git. `db push` only runs migrations not yet applied to the remote — safe to run repeatedly.
 
+## Testing
+
+```bash
+npm test --workspace=server              # mocked unit tests — fast, no Docker required
+npm run test:integration --workspace=server  # real Postgres — needs `supabase start` + src/server/.env.local
+```
+
+The integration suite runs the actual service code against a local Postgres instance to catch what mocks can't (constraint violations, real PostgREST response shapes, untested migrations). See `technical-notes.md` "Testing" for how it's isolated and why it's structured this way.
+
 ## Production setup (one-time)
 
 1. Create a Supabase cloud project at supabase.com
@@ -79,5 +86,5 @@ Prod env vars never go in files — hosting dashboard only.
 | Backend | Node.js + Hono |
 | Database + Auth | Supabase (PostgreSQL) |
 | Messaging | Stream Chat |
-| Payments | Stripe (future) |
+| Payments | Stripe (deferred to v2 — see brainstorm.md Future Features Roadmap) |
 | Hosting | Railway or Render |
