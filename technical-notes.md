@@ -150,6 +150,18 @@ The remote tracks applied migrations in a `supabase_migrations` table — `db pu
 
 ---
 
+## Testing
+
+**Unit suite (`npm test --workspace=server`):** every existing `*.service.test.ts`/`*.router.test.ts` mocks `lib/supabase.ts`'s `supabase.from()` entirely — fast, no Docker, verifies branching/row-mapping logic given an assumed DB response shape. Scoped via `vitest.config.ts`'s `include: ['src/**/__tests__/**/*.test.ts']`, so it never touches `src/__integration__/`.
+
+**Integration suite (`npm run test:integration --workspace=server`, `src/server/src/__integration__/`):** runs the real `*.service.ts` code against a real local Postgres, for the specific class of bug mocks structurally can't catch — constraint violations, real PostgREST response shapes, untested migrations. Deliberately light: a couple of targeted tests, not a parallel copy of the unit suite. Requires `supabase start` (Docker) and `src/server/.env.local` populated from its printed output, same as `dev`. Separate `vitest.integration.config.ts` (`fileParallelism: false` — tests share DB state via truncate-between-tests cleanup, see below) so the default `npm test` stays Docker-free.
+
+**Fixtures (`src/server/src/test/integration-helpers.ts`):** `profiles.id` references `auth.users(id)`, with a trigger auto-creating the `profiles` row on insert — so test users must go through `supabase.auth.admin.createUser(...)`, never a direct `profiles` insert. `createTestUser` wraps that plus an optional `profiles` patch (e.g. `placementSessionsRemaining: 0` to opt a fixture out of placement-mode scoring, matching the unit suite's baseline assumptions).
+
+**Isolation — truncate via a direct `pg` connection, not transaction rollback:** PostgREST executes each HTTP request as its own transaction, so multi-call flows like `submitRating` (several sequential `supabase.from()` calls) can't be wrapped in one outer transaction without bypassing PostgREST — which would defeat testing through the real client. Instead, `afterEach` runs `TRUNCATE TABLE auth.users, venues CASCADE` over a raw `pg.Client` (used only for this, never by code under test): `CASCADE` follows the FK graph regardless of each FK's own `ON DELETE` action, reaching every dependent table without hand-maintaining a deletion order; `venues` is listed explicitly since unclaimed venues aren't reachable from `auth.users`. No `RESTART IDENTITY` — every table uses a uuid PK, and the local `postgres` role isn't a true superuser, so it can't reset sequences it doesn't own (e.g. auth's internal `refresh_tokens_id_seq`, which `CASCADE` would otherwise try to touch).
+
+---
+
 ## Database Logic
 
 **Venue availability lookup (two-step) — not yet implemented:** `venue.service.ts` currently returns raw `venue_hours` rows as-is (see `toVenue()`); nothing applies this lookup logic, and `venue_date_exceptions` isn't read or written anywhere in code yet (the table exists in the migration, unused). The intended logic, once built:

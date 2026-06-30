@@ -25,9 +25,10 @@ npm run typecheck                  # typecheck all workspaces
 
 # Server only (src/server)
 npm run dev --workspace=server     # tsx watch, loads .env.local
-npm test --workspace=server        # vitest run (all tests)
+npm test --workspace=server        # vitest run (mocked unit tests, no Docker needed)
 npx vitest run src/domains/user --workspace=server    # one domain
 npx vitest run -t "test name"      # by test name
+npm run test:integration --workspace=server   # real-Postgres tests, needs `supabase start` + .env.local — see technical-notes.md "Testing"
 
 # Client only (src/client)
 npm run dev --workspace=client     # next dev --turbopack, localhost:3000
