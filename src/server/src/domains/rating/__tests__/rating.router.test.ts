@@ -84,6 +84,16 @@ describe('POST /submit', () => {
     expect(res.status).toBe(403);
   });
 
+  it('returns 403 on session_not_eligible', async () => {
+    mockSubmitRating.mockResolvedValue({ ok: false, reason: 'session_not_eligible' });
+    const res = await ratingRouter.request('/submit', {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: SESSION_ID, rateeId: RATEE_ID, vote: 'stronger' }),
+    });
+    expect(res.status).toBe(403);
+  });
+
   it('returns 409 on duplicate', async () => {
     mockSubmitRating.mockResolvedValue({ ok: false, reason: 'duplicate' });
     const res = await ratingRouter.request('/submit', {
@@ -133,22 +143,28 @@ describe('POST /submit', () => {
 // ---------------------------------------------------------------------------
 
 describe('GET /user/:userId', () => {
-  it('does not require an Authorization header', async () => {
-    mockGetUserRatingDisplay.mockResolvedValue(RATING_DISPLAY);
+  it('returns 401 when no Authorization header is present', async () => {
     const res = await ratingRouter.request(`/user/${USER_ID}`);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
+    expect(mockGetUserRatingDisplay).not.toHaveBeenCalled();
   });
 
   it('returns 200 with only the derived rating display, no raw score', async () => {
     mockGetUserRatingDisplay.mockResolvedValue(RATING_DISPLAY);
-    const res = await ratingRouter.request(`/user/${USER_ID}`);
+    const res = await ratingRouter.request(`/user/${USER_ID}`, { headers: withAuth() });
     const body = await res.json();
     expect(body).toEqual({ userId: USER_ID, rating: RATING_DISPLAY });
   });
 
-  it('returns 404 when the user has no rating record', async () => {
+  it('passes the authenticated requester id through so the service can check privacy', async () => {
+    mockGetUserRatingDisplay.mockResolvedValue(RATING_DISPLAY);
+    await ratingRouter.request(`/user/${USER_ID}`, { headers: withAuth('someone-else') });
+    expect(mockGetUserRatingDisplay).toHaveBeenCalledWith(USER_ID, 'someone-else');
+  });
+
+  it('returns 404 when the user has no rating record or the profile is private to a non-owner', async () => {
     mockGetUserRatingDisplay.mockResolvedValue(null);
-    const res = await ratingRouter.request(`/user/${USER_ID}`);
+    const res = await ratingRouter.request(`/user/${USER_ID}`, { headers: withAuth() });
     expect(res.status).toBe(404);
   });
 });

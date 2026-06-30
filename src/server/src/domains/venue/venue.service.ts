@@ -145,14 +145,6 @@ export async function updateVenue(
   fields: VenueUpdateFields,
 ): Promise<Venue | null> {
   const admin = await isAdmin(userId);
-  if (!admin) {
-    const { data: existing } = await supabase
-      .from('venues')
-      .select('claimed_by_account_id')
-      .eq('id', id)
-      .single();
-    if (!existing || existing.claimed_by_account_id !== userId) return null;
-  }
 
   const updates: Record<string, unknown> = {};
   if (fields.name !== undefined) updates.name = fields.name;
@@ -169,30 +161,21 @@ export async function updateVenue(
   if (fields.contactWebsite !== undefined) updates.contact_website = fields.contactWebsite;
   if (fields.bookingUrl !== undefined) updates.booking_url = fields.bookingUrl;
 
-  const { data, error } = await supabase
-    .from('venues')
-    .update(updates)
-    .eq('id', id)
-    .select(VENUE_SELECT)
-    .single();
+  let query = supabase.from('venues').update(updates).eq('id', id);
+  if (!admin) query = query.eq('claimed_by_account_id', userId);
+
+  const { data, error } = await query.select(VENUE_SELECT).single();
 
   if (error || !data) return null;
   return toVenue(data as VenueRow);
 }
 
 export async function claimVenue(id: string, userId: string): Promise<Venue | null> {
-  const { data: existing } = await supabase
-    .from('venues')
-    .select('claimed_by_account_id')
-    .eq('id', id)
-    .single();
-
-  if (!existing || existing.claimed_by_account_id !== null) return null;
-
   const { data, error } = await supabase
     .from('venues')
     .update({ claimed_by_account_id: userId })
     .eq('id', id)
+    .is('claimed_by_account_id', null)
     .select(VENUE_SELECT)
     .single();
 

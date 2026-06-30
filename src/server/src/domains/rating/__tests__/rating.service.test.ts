@@ -342,6 +342,21 @@ describe('toRatingDisplay', () => {
     expect(display.subtier).toBe(4);
   });
 
+  it('uses equal-width floor-based quarters instead of rounding to the nearest boundary', () => {
+    // With round-to-nearest, 4.24 would round up to subtier 2 (0.24/0.25 = 0.96 -> round = 1).
+    // Floor-based bucketing keeps it in subtier 1 since 0.24 hasn't crossed the 0.25 quarter line.
+    expect(toRatingDisplay(4.24, 0).subtier).toBe(1);
+    expect(toRatingDisplay(4.25, 0).subtier).toBe(2);
+  });
+
+  it('does not collapse distinct scores within the top subtier band', () => {
+    // Previously, round-to-nearest gave the top subtier a double-width band ([0.625, 1.0))
+    // while the bottom subtier got a half-width band ([0, 0.125)). Floor-based bucketing
+    // gives every subtier an equal 0.25-wide band, so these two remain distinguishable.
+    expect(toRatingDisplay(7.7, 0).subtier).toBe(3);
+    expect(toRatingDisplay(7.99, 0).subtier).toBe(4);
+  });
+
   it('marks the rating provisional while placement sessions remain', () => {
     expect(toRatingDisplay(4.0, 2).isProvisional).toBe(true);
     expect(toRatingDisplay(4.0, 0).isProvisional).toBe(false);
@@ -444,6 +459,10 @@ const RATEE_PROFILE = {
   promotion_protection_started_at: null,
 };
 
+// An eligible session: already happened, not cancelled.
+const SESSION_ROW = { starts_at: '2020-01-01T00:00:00Z', status: 'completed' };
+const eligibleSessionChain = () => singleChain(SESSION_ROW);
+
 beforeEach(() => vi.clearAllMocks());
 
 describe('submitRating', () => {
@@ -459,16 +478,44 @@ describe('submitRating', () => {
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
+  it('returns not_found when the session does not exist', async () => {
+    mockFrom.mockReturnValueOnce(singleChain(null));
+
+    const result = await submitRating(RATER_ID, SESSION_ID, RATEE_ID, 'stronger');
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+    expect(mockFrom).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects rating a cancelled session', async () => {
+    mockFrom.mockReturnValueOnce(singleChain({ starts_at: '2020-01-01T00:00:00Z', status: 'cancelled' }));
+
+    const result = await submitRating(RATER_ID, SESSION_ID, RATEE_ID, 'stronger');
+    expect(result).toEqual({ ok: false, reason: 'session_not_eligible' });
+    expect(mockFrom).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects rating a session that has not started yet', async () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    mockFrom.mockReturnValueOnce(singleChain({ starts_at: future, status: 'upcoming' }));
+
+    const result = await submitRating(RATER_ID, SESSION_ID, RATEE_ID, 'stronger');
+    expect(result).toEqual({ ok: false, reason: 'session_not_eligible' });
+    expect(mockFrom).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a duplicate submission from the same rater', async () => {
-    mockFrom.mockReturnValueOnce(arrayChain([{ rater_id: RATER_ID }]));
+    mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
+      .mockReturnValueOnce(arrayChain([{ rater_id: RATER_ID }]));
 
     const result = await submitRating(RATER_ID, SESSION_ID, RATEE_ID, 'stronger');
     expect(result).toEqual({ ok: false, reason: 'duplicate' });
-    expect(mockFrom).toHaveBeenCalledTimes(1);
+    expect(mockFrom).toHaveBeenCalledTimes(2);
   });
 
   it('rejects when the rater or ratee did not RSVP as going', async () => {
     mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
       .mockReturnValueOnce(arrayChain([])) // no prior submissions
       .mockReturnValueOnce(arrayChain([{ user_id: RATEE_ID, status: 'going' }])); // rater missing
 
@@ -478,6 +525,7 @@ describe('submitRating', () => {
 
   it('returns not_found when a profile is missing', async () => {
     mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
       .mockReturnValueOnce(arrayChain([]))
       .mockReturnValueOnce(arrayChain(GOING_RSVPS))
       .mockReturnValueOnce(singleChain(null)) // rater profile fetch fails
@@ -490,18 +538,54 @@ describe('submitRating', () => {
   it('records a did_not_play vote without computing a score update', async () => {
     const submissionChain = okChain();
     mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
       .mockReturnValueOnce(arrayChain([]))
       .mockReturnValueOnce(arrayChain(GOING_RSVPS))
       .mockReturnValueOnce(singleChain(RATER_PROFILE))
       .mockReturnValueOnce(singleChain(RATEE_PROFILE))
-      .mockReturnValueOnce(submissionChain);
+      .mockReturnValueOnce(submissionChain)
+      .mockReturnValueOnce(okChain()); // placement decrement (first submission for ratee in session)
 
     const result = await submitRating(RATER_ID, SESSION_ID, RATEE_ID, 'did_not_play');
     expect(result).toEqual({ ok: true });
-    expect(mockFrom).toHaveBeenCalledTimes(5);
+    expect(mockFrom).toHaveBeenCalledTimes(7);
     expect(submissionChain['insert']).toHaveBeenCalledWith(
       expect.objectContaining({ vote: 'did_not_play' }),
     );
+  });
+
+  it('decrements placement_sessions_remaining on a did_not_play vote when it is the first submission for the ratee in this session', async () => {
+    const placementUpdate = okChain();
+    mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
+      .mockReturnValueOnce(arrayChain([])) // first submission for this ratee in session
+      .mockReturnValueOnce(arrayChain(GOING_RSVPS))
+      .mockReturnValueOnce(singleChain(RATER_PROFILE))
+      .mockReturnValueOnce(singleChain({ ...RATEE_PROFILE, placement_sessions_remaining: 3 }))
+      .mockReturnValueOnce(okChain()) // submission insert
+      .mockReturnValueOnce(placementUpdate); // placement decrement
+
+    await submitRating(RATER_ID, SESSION_ID, RATEE_ID, 'did_not_play');
+
+    expect(placementUpdate['update']).toHaveBeenCalledWith(
+      expect.objectContaining({ placement_sessions_remaining: 2 }),
+    );
+  });
+
+  it('does not decrement placement_sessions_remaining on a did_not_play vote when another rater already submitted', async () => {
+    const submissionChain = okChain();
+    mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
+      .mockReturnValueOnce(arrayChain([{ rater_id: 'someone-else' }])) // not first submission
+      .mockReturnValueOnce(arrayChain(GOING_RSVPS))
+      .mockReturnValueOnce(singleChain(RATER_PROFILE))
+      .mockReturnValueOnce(singleChain({ ...RATEE_PROFILE, placement_sessions_remaining: 3 }))
+      .mockReturnValueOnce(submissionChain); // submission insert — no further calls expected
+
+    const result = await submitRating(RATER_ID, SESSION_ID, RATEE_ID, 'did_not_play');
+
+    expect(result).toEqual({ ok: true });
+    expect(mockFrom).toHaveBeenCalledTimes(6);
   });
 
   it('updates the ratee score and writes rating history on a normal vote', async () => {
@@ -511,6 +595,7 @@ describe('submitRating', () => {
     const historyInsert = okChain();
 
     mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
       .mockReturnValueOnce(arrayChain([])) // no prior submissions -> first for ratee in session
       .mockReturnValueOnce(arrayChain(GOING_RSVPS)) // participant check
       .mockReturnValueOnce(singleChain(RATER_PROFILE)) // rater profile
@@ -526,7 +611,7 @@ describe('submitRating', () => {
     const result = await submitRating(RATER_ID, SESSION_ID, RATEE_ID, 'stronger');
 
     expect(result).toEqual({ ok: true });
-    expect(mockFrom).toHaveBeenCalledTimes(11);
+    expect(mockFrom).toHaveBeenCalledTimes(12);
     expect(profileUpdate['update']).toHaveBeenCalledWith(
       expect.objectContaining({ internal_score: 4.06, placement_sessions_remaining: 0 }),
     );
@@ -543,6 +628,7 @@ describe('submitRating', () => {
   it('decrements placement_sessions_remaining only on the first submission for the ratee in this session', async () => {
     const profileUpdate = okChain();
     mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
       .mockReturnValueOnce(arrayChain([])) // first submission for this ratee in session
       .mockReturnValueOnce(arrayChain(GOING_RSVPS))
       .mockReturnValueOnce(singleChain(RATER_PROFILE))
@@ -565,6 +651,7 @@ describe('submitRating', () => {
   it('does not decrement placement_sessions_remaining when another rater already submitted for this ratee in this session', async () => {
     const profileUpdate = okChain();
     mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
       .mockReturnValueOnce(arrayChain([{ rater_id: 'someone-else' }])) // not first submission
       .mockReturnValueOnce(arrayChain(GOING_RSVPS))
       .mockReturnValueOnce(singleChain(RATER_PROFILE))
@@ -587,6 +674,7 @@ describe('submitRating', () => {
   it('flags the submission when the rater is far outside their calibration range', async () => {
     const submissionInsert = okChain();
     mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
       .mockReturnValueOnce(arrayChain([]))
       .mockReturnValueOnce(arrayChain(GOING_RSVPS))
       .mockReturnValueOnce(singleChain({ internal_score: 8.5 }))
@@ -609,6 +697,7 @@ describe('submitRating', () => {
   it('persists a demotion-protection start timestamp when a vote first crosses the grade floor', async () => {
     const profileUpdate = okChain();
     mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
       .mockReturnValueOnce(arrayChain([]))
       .mockReturnValueOnce(arrayChain(GOING_RSVPS))
       .mockReturnValueOnce(singleChain({ internal_score: 6.0 }))
@@ -633,6 +722,7 @@ describe('submitRating', () => {
     const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
     const profileUpdate = okChain();
     mockFrom
+      .mockReturnValueOnce(eligibleSessionChain())
       .mockReturnValueOnce(arrayChain([]))
       .mockReturnValueOnce(arrayChain(GOING_RSVPS))
       .mockReturnValueOnce(singleChain({ internal_score: 6.0 }))

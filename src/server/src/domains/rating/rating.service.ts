@@ -54,15 +54,16 @@ function toRatingHistory(row: RatingHistoryRow): RatingHistory {
 // Reads
 // ---------------------------------------------------------------------------
 
-export async function getUserRatingDisplay(userId: string): Promise<RatingDisplay | null> {
+export async function getUserRatingDisplay(userId: string, requesterId: string): Promise<RatingDisplay | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('internal_score, placement_sessions_remaining')
+    .select('internal_score, placement_sessions_remaining, privacy_level')
     .eq('id', userId)
     .is('deleted_at', null)
     .single();
 
   if (error || !data) return null;
+  if (data.privacy_level === 'private' && userId !== requesterId) return null;
   return toRatingDisplay(data.internal_score, data.placement_sessions_remaining);
 }
 
@@ -83,7 +84,16 @@ export async function getRatingHistory(userId: string): Promise<RatingHistory[]>
 
 export type SubmitRatingResult =
   | { ok: true }
-  | { ok: false; reason: 'invalid_vote' | 'self_rating' | 'duplicate' | 'not_participant' | 'not_found' };
+  | {
+      ok: false;
+      reason:
+        | 'invalid_vote'
+        | 'self_rating'
+        | 'duplicate'
+        | 'not_participant'
+        | 'not_found'
+        | 'session_not_eligible';
+    };
 
 const VALID_VOTES: RelativeVote[] = [
   'much_stronger',
@@ -102,6 +112,17 @@ export async function submitRating(
 ): Promise<SubmitRatingResult> {
   if (!VALID_VOTES.includes(vote)) return { ok: false, reason: 'invalid_vote' };
   if (raterId === rateeId) return { ok: false, reason: 'self_rating' };
+
+  const { data: session } = await supabase
+    .from('sessions')
+    .select('starts_at, status')
+    .eq('id', sessionId)
+    .single();
+
+  if (!session) return { ok: false, reason: 'not_found' };
+  if (session.status === 'cancelled' || new Date(session.starts_at) > new Date()) {
+    return { ok: false, reason: 'session_not_eligible' };
+  }
 
   const { data: existingSubmissions } = await supabase
     .from('session_rating_submissions')
@@ -130,6 +151,7 @@ export async function submitRating(
     .from('profiles')
     .select('internal_score')
     .eq('id', raterId)
+    .is('deleted_at', null)
     .single();
 
   const { data: rateeProfile } = await supabase
@@ -138,6 +160,7 @@ export async function submitRating(
       'internal_score, rating_floor, verified_tier, placement_sessions_remaining, demotion_protection_started_at, promotion_protection_started_at',
     )
     .eq('id', rateeId)
+    .is('deleted_at', null)
     .single();
 
   if (!raterProfile || !rateeProfile) return { ok: false, reason: 'not_found' };
@@ -172,6 +195,12 @@ export async function submitRating(
   if (insertError) return { ok: false, reason: 'duplicate' };
 
   if (vote === 'did_not_play') {
+    if (isFirstSubmissionForRateeInSession) {
+      await supabase
+        .from('profiles')
+        .update({ placement_sessions_remaining: Math.max(placementSessionsRemaining - 1, 0) })
+        .eq('id', rateeId);
+    }
     return { ok: true };
   }
 

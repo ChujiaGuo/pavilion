@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { auth } from '../../middleware/auth.js';
+import type { VenueType } from '@pavilion/types';
 import {
   getVenueById,
   listVenues,
@@ -11,11 +12,32 @@ import {
 
 export const venueRouter = new Hono<{ Variables: { userId: string } }>();
 
+const VENUE_TYPES: VenueType[] = ['club', 'rec_center', 'community_center', 'gym'];
+
+const EDITABLE_VENUE_FIELDS = new Set([
+  'name',
+  'type',
+  'address',
+  'city',
+  'region',
+  'courtCount',
+  'surfaceType',
+  'shuttleType',
+  'dropInAvailable',
+  'reservationRequired',
+  'contactPhone',
+  'contactWebsite',
+  'bookingUrl',
+]);
+
 venueRouter.get('/', async (c) => {
   const { city, type, drop_in } = c.req.query();
+  if (type !== undefined && !VENUE_TYPES.includes(type as VenueType)) {
+    return c.json({ error: 'Invalid type' }, 400);
+  }
   const venues = await listVenues({
     city: city || undefined,
-    type: type as any || undefined,
+    type: type as VenueType | undefined,
     dropInAvailable: drop_in !== undefined ? drop_in === 'true' : undefined,
   });
   return c.json({ venues });
@@ -52,6 +74,9 @@ venueRouter.post('/:id/suggest-edit', auth, async (c) => {
   const { fieldName, suggestedValue } = body;
   if (!fieldName || suggestedValue === undefined) {
     return c.json({ error: 'fieldName and suggestedValue are required' }, 400);
+  }
+  if (!EDITABLE_VENUE_FIELDS.has(fieldName)) {
+    return c.json({ error: 'Invalid fieldName' }, 400);
   }
   const ok = await submitEditSuggestion(c.req.param('id'), c.get('userId'), fieldName, suggestedValue);
   if (!ok) return c.json({ error: 'Failed to submit suggestion' }, 500);

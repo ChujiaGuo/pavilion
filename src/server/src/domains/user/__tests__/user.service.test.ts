@@ -36,8 +36,6 @@ const BASE_ROW = {
   privacy_level: 'public',
   verified_tier: null,
   rating_floor: null,
-  reliability_score: 100,
-  session_count: 5,
   created_at: '2026-01-01T00:00:00Z',
 };
 

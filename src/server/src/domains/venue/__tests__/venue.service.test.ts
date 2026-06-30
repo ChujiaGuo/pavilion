@@ -252,35 +252,27 @@ describe('createVenue', () => {
 // ---------------------------------------------------------------------------
 
 describe('updateVenue', () => {
-  it('returns null when user is neither admin nor the claimed account holder', async () => {
+  it('returns null when the update affects no rows (user is not the claimed account holder)', async () => {
     const adminChain = makeChain();
     adminChain['single'].mockResolvedValue({ data: null, error: null }); // not admin
-    const checkChain = makeChain();
-    checkChain['single'].mockResolvedValue({
-      data: { claimed_by_account_id: 'someone-else' },
-      error: null,
-    });
-    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(checkChain);
+    const updateChain = makeChain();
+    // claimed_by_account_id filter excludes the row -> 0 rows -> .single() errors
+    updateChain['single'].mockResolvedValue({ data: null, error: new Error('no rows') });
+    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(updateChain);
 
     expect(await updateVenue('venue-1', 'user-1', { name: 'New Name' })).toBeNull();
   });
 
-  it('allows update when user is the claimed account holder', async () => {
+  it('scopes the update to rows claimed by the requesting user when not admin', async () => {
     const adminChain = makeChain();
     adminChain['single'].mockResolvedValue({ data: null, error: null }); // not admin
-    const checkChain = makeChain();
-    checkChain['single'].mockResolvedValue({
-      data: { claimed_by_account_id: 'user-1' },
-      error: null,
-    });
     const updateChain = makeChain();
     updateChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
-    mockFrom
-      .mockReturnValueOnce(adminChain)
-      .mockReturnValueOnce(checkChain)
-      .mockReturnValueOnce(updateChain);
+    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(updateChain);
 
     expect(await updateVenue('venue-1', 'user-1', { name: 'New Name' })).not.toBeNull();
+    expect(updateChain['eq']).toHaveBeenCalledWith('id', 'venue-1');
+    expect(updateChain['eq']).toHaveBeenCalledWith('claimed_by_account_id', 'user-1');
   });
 
   it('allows update when user is an admin and skips the claimed_by check', async () => {
@@ -292,6 +284,8 @@ describe('updateVenue', () => {
 
     expect(await updateVenue('venue-1', 'admin-1', { name: 'New Name' })).not.toBeNull();
     expect(mockFrom).toHaveBeenCalledTimes(2); // admins check + update only
+    expect(updateChain['eq']).toHaveBeenCalledWith('id', 'venue-1');
+    expect(updateChain['eq']).not.toHaveBeenCalledWith('claimed_by_account_id', expect.anything());
   });
 
   it('only sends provided fields in the update payload', async () => {
@@ -323,12 +317,10 @@ describe('updateVenue', () => {
 // ---------------------------------------------------------------------------
 
 describe('claimVenue', () => {
-  it('returns null when the venue is already claimed', async () => {
+  it('returns null when the venue is already claimed (update matches no rows)', async () => {
     const chain = makeChain();
-    chain['single'].mockResolvedValue({
-      data: { claimed_by_account_id: 'someone-else' },
-      error: null,
-    });
+    // claimed_by_account_id IS NULL filter excludes the row -> 0 rows -> .single() errors
+    chain['single'].mockResolvedValue({ data: null, error: new Error('no rows') });
     mockFrom.mockReturnValue(chain);
 
     expect(await claimVenue('venue-1', 'user-1')).toBeNull();
@@ -342,32 +334,33 @@ describe('claimVenue', () => {
     expect(await claimVenue('venue-1', 'user-1')).toBeNull();
   });
 
-  it('sets claimed_by_account_id to the requesting user', async () => {
-    const checkChain = makeChain();
-    checkChain['single'].mockResolvedValue({
-      data: { claimed_by_account_id: null },
-      error: null,
-    });
+  it('sets claimed_by_account_id to the requesting user and guards on claimed_by_account_id IS NULL', async () => {
     const updateChain = makeChain();
     updateChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
-    mockFrom.mockReturnValueOnce(checkChain).mockReturnValueOnce(updateChain);
+    mockFrom.mockReturnValue(updateChain);
 
     await claimVenue('venue-1', 'user-1');
     expect(updateChain['update']).toHaveBeenCalledWith({ claimed_by_account_id: 'user-1' });
+    expect(updateChain['eq']).toHaveBeenCalledWith('id', 'venue-1');
+    expect(updateChain['is']).toHaveBeenCalledWith('claimed_by_account_id', null);
   });
 
   it('returns the updated venue on success', async () => {
-    const checkChain = makeChain();
-    checkChain['single'].mockResolvedValue({
-      data: { claimed_by_account_id: null },
-      error: null,
-    });
     const updateChain = makeChain();
     updateChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
-    mockFrom.mockReturnValueOnce(checkChain).mockReturnValueOnce(updateChain);
+    mockFrom.mockReturnValue(updateChain);
 
     const venue = await claimVenue('venue-1', 'user-1');
     expect(venue).toMatchObject({ id: 'venue-1' });
+  });
+
+  it('only issues a single query (no separate pre-check)', async () => {
+    const updateChain = makeChain();
+    updateChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    mockFrom.mockReturnValue(updateChain);
+
+    await claimVenue('venue-1', 'user-1');
+    expect(mockFrom).toHaveBeenCalledTimes(1);
   });
 });
 

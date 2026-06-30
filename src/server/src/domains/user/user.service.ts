@@ -12,10 +12,11 @@ type UserRow = {
   privacy_level: string;
   verified_tier: number | null;
   rating_floor: number | null;
-  reliability_score: number;
-  session_count: number;
   created_at: string;
 };
+
+const PROFILE_SELECT =
+  'id, display_name, photo_url, city, region, preferred_formats, play_style, privacy_level, verified_tier, rating_floor, created_at';
 
 type UserUpdateFields = Partial<Pick<User,
   'displayName' | 'photoUrl' | 'city' | 'region' | 'preferredFormats' | 'playStyle' | 'privacyLevel'
@@ -40,7 +41,7 @@ function toUser(row: UserRow): User {
 export async function getUserById(id: string, requesterId: string): Promise<User | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, display_name, photo_url, city, region, preferred_formats, play_style, privacy_level, verified_tier, rating_floor, reliability_score, session_count, created_at')
+    .select(PROFILE_SELECT)
     .eq('id', id)
     .is('deleted_at', null)
     .single();
@@ -68,7 +69,7 @@ export async function updateUser(id: string, fields: UserUpdateFields): Promise<
     .update(updates)
     .eq('id', id)
     .is('deleted_at', null)
-    .select('id, display_name, photo_url, city, region, preferred_formats, play_style, privacy_level, verified_tier, rating_floor, reliability_score, session_count, created_at')
+    .select(PROFILE_SELECT)
     .single();
 
   if (error || !data) return null;

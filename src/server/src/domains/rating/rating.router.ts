@@ -9,6 +9,7 @@ const REASON_STATUS: Record<Extract<SubmitRatingResult, { ok: false }>['reason']
   invalid_vote: 400,
   self_rating: 400,
   not_participant: 403,
+  session_not_eligible: 403,
   duplicate: 409,
   not_found: 404,
 };
@@ -28,9 +29,9 @@ ratingRouter.post('/submit', auth, async (c) => {
   return c.json({ success: true }, 201);
 });
 
-ratingRouter.get('/user/:userId', async (c) => {
+ratingRouter.get('/user/:userId', auth, async (c) => {
   const userId = c.req.param('userId');
-  const rating = await getUserRatingDisplay(userId);
+  const rating = await getUserRatingDisplay(userId, c.get('userId'));
   if (!rating) return c.json({ error: 'Not found' }, 404);
   return c.json({ userId, rating });
 });

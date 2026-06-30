@@ -201,7 +201,7 @@ export function computeRatingUpdate(input: ComputeRatingUpdateInput): ComputeRat
 
 export function toRatingDisplay(internalScore: number, placementSessionsRemaining: number): RatingDisplay {
   const grade = Math.floor(internalScore);
-  const subtierIndex = clamp(Math.round((internalScore % 1) / 0.25), 0, 3);
+  const subtierIndex = clamp(Math.floor((internalScore % 1) / 0.25), 0, 3);
   const subtier = (subtierIndex + 1) as 1 | 2 | 3 | 4;
 
   return {

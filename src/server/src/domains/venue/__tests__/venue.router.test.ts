@@ -121,6 +121,20 @@ describe('GET /', () => {
       expect.objectContaining({ dropInAvailable: undefined })
     );
   });
+
+  it('passes a valid type query param through to listVenues', async () => {
+    mockListVenues.mockResolvedValue([]);
+    await venueRouter.request('/?type=club');
+    expect(mockListVenues).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'club' })
+    );
+  });
+
+  it('returns 400 for an invalid type query param without calling listVenues', async () => {
+    const res = await venueRouter.request('/?type=arbitrary_string');
+    expect(res.status).toBe(400);
+    expect(mockListVenues).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -271,6 +285,16 @@ describe('POST /:id/suggest-edit', () => {
       body: JSON.stringify({ fieldName: 'name' }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when fieldName is not an editable venue field, without calling submitEditSuggestion', async () => {
+    const res = await venueRouter.request(`/${VENUE_ID}/suggest-edit`, {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fieldName: 'claimed_by_account_id', suggestedValue: 'attacker-id' }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockSubmitEditSuggestion).not.toHaveBeenCalled();
   });
 
   it('returns 500 on DB error', async () => {
