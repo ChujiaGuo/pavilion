@@ -37,7 +37,7 @@ Chose **Supabase (PostgreSQL)** over Firebase (Firestore) for the following reas
 
 - **Relational data model** — users → sessions → ratings → venues are deeply relational. SQL joins are natural; Firestore requires manual denormalization and multiple round trips for the same queries.
 - **Rating calculations** — weighted averages, session history, anomaly detection, distribution calibration all map cleanly to SQL. Firestore cannot do this without significant workarounds.
-- **Geospatial search** — PostGIS extension gives native "venues within X miles" queries. Firebase has no equivalent.
+- **Geospatial search** — PostGIS extension gives native "venues within X miles" queries. Firebase has no equivalent. (This is the stack-choice rationale, not a status report: the schema is ready — `venues.location geography(Point,4326)` with a GIST index — but `venue.service.ts` doesn't query it yet; `listVenues` only filters by city/type/drop-in availability. Not yet implemented.)
 - **Row Level Security (RLS)** — "default private" profile access enforced at the DB layer, not just application code. Harder to accidentally expose data.
 - **Marketplace readiness** — inventory, orders, commissions, and transactions are relational by nature. Adding the marketplace to Postgres is natural; retrofitting Firestore is painful.
 - **Open source / no vendor lock-in** — can self-host if pricing becomes an issue. Firebase is Google-only.
@@ -148,17 +148,17 @@ The remote tracks applied migrations in a `supabase_migrations` table — `db pu
 
 ## Database Logic
 
-**Venue availability lookup (two-step):**
+**Venue availability lookup (two-step) — not yet implemented:** `venue.service.ts` currently returns raw `venue_hours` rows as-is (see `toVenue()`); nothing applies this lookup logic, and `venue_date_exceptions` isn't read or written anywhere in code yet (the table exists in the migration, unused). The intended logic, once built:
 1. Check `venue_date_exceptions` for the exact date. If a row exists: null `open_time` means fully closed; non-null times override the regular schedule.
 2. If no exception row, fall back to `venue_hours` for that `day_of_week`.
 
 **Venue hours granularity:** `venue_hours` uses day-of-week only. "1st and 3rd Tuesday" patterns are out of scope for v1 — `venue_date_exceptions` handles one-offs, and weekly schedules cover the vast majority of real venues at launch.
 
-**Write access for `venue_date_exceptions`:** claimed venue accounts (those with `claimed_by_account_id` set) only. For unclaimed venues, platform admins only.
+**Write access for `venue_date_exceptions` (not yet implemented — no endpoint exists):** intended to be claimed venue accounts (those with `claimed_by_account_id` set) only. For unclaimed venues, platform admins only.
 
 **Rating display derivation:** see "Rating System" above for the full formula, clamping, and label format (`toRatingDisplay` in `rating.service.ts`). Always computed server-side from `internal_score` — never expose the raw float to the client.
 
-**Shuttle cost per person:** computed at read time, not stored. Formula: `ceil((player_count / 12) * (duration_minutes / 60)) * shuttle_tube_price / player_count`. Derives from `shuttle_tube_price` on the session, live RSVP count, and `duration_minutes`. Storing it would require keeping it in sync every time attendance changes.
+**Shuttle cost per person — not yet implemented:** see "Shuttle cost calculation" under Session & Venue below for the formula. `session.router.ts` is currently a stub with no service file, so nothing computes this yet.
 
 **Admin RLS pattern:** `EXISTS (SELECT 1 FROM admins WHERE user_id = auth.uid())`. Check this in any policy that gates admin-only writes.
 
@@ -181,7 +181,7 @@ The remote tracks applied migrations in a `supabase_migrations` table — `db pu
 - Only trigger Stripe onboarding when organizer first creates a paid session, not at signup
 - Do NOT build payment infrastructure in v1 — validate session feature first
 
-**Shuttle cost calculation:**
+**Shuttle cost calculation (not yet implemented — `session` domain is still a router-only stub):**
 - Formula: `tubes_needed = ceil((player_count / 12) * hours)`
 - `shuttle_fee_per_person = (tubes_needed * tube_price) / player_count`
 - Organizer inputs tube price (varies by brand/feather vs. plastic); app suggests the per-person fee
