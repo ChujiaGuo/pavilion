@@ -1,6 +1,6 @@
 # Database Schema
 
-_Last updated: 2026-06-30_
+_Last updated: 2026-06-30 (added `venues.lng`/`lat` generated columns; added `service_role` schema GRANTs — see technical-notes.md "Environments")_
 
 PostgreSQL via Supabase. PostGIS extension enabled.
 
@@ -56,7 +56,9 @@ See `technical-notes.md` for lookup logic, derivation formulas, and access contr
 | `address` | text | |
 | `city` | text | |
 | `region` | text | |
-| `location` | geography(Point, 4326) | |
+| `location` | geography(Point, 4326) | Source of truth for the point. Not read directly by app code — see `lng`/`lat` below |
+| `lng` | double precision | generated, `ST_X(location::geometry)`. PostgREST returns `geography` columns as an EWKB hex string, not `{ coordinates: [...] }` — `venue.service.ts` reads this generated column instead of parsing the wire format |
+| `lat` | double precision | generated, `ST_Y(location::geometry)` |
 | `court_count` | integer | |
 | `surface_type` | text | `'synthetic_mat'`, `'wood'`, `'concrete'`, `'outdoor'` |
 | `shuttle_type` | text | `'feather'`, `'plastic'`, `'both'` |

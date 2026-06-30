@@ -8,7 +8,8 @@ type VenueRow = {
   address: string;
   city: string;
   region: string;
-  location: { coordinates: [number, number] };
+  lng: number;
+  lat: number;
   court_count: number;
   surface_type: string;
   shuttle_type: string;
@@ -49,7 +50,6 @@ export type VenueListFilters = {
 };
 
 function toVenue(row: VenueRow): Venue {
-  const [lng, lat] = row.location.coordinates;
   return {
     id: row.id,
     name: row.name,
@@ -57,8 +57,8 @@ function toVenue(row: VenueRow): Venue {
     address: row.address,
     city: row.city,
     region: row.region,
-    lat,
-    lng,
+    lat: row.lat,
+    lng: row.lng,
     courtCount: row.court_count,
     surfaceType: row.surface_type as Venue['surfaceType'],
     shuttleType: row.shuttle_type as Venue['shuttleType'],

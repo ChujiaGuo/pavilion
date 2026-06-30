@@ -172,6 +172,8 @@ The remote tracks applied migrations in a `supabase_migrations` table — `db pu
 
 ## Session & Venue
 
+**`venues.lng`/`lat` are stored, unlike other derived values — and that's fine:** the broader rule (see CLAUDE.md) is that *business-logic* derivations (rating tier, shuttle cost) are computed server-side on every read, never cached, to avoid staleness. `lng`/`lat` are a different thing: `STORED GENERATED` columns that Postgres keeps in lockstep with `location` on every write — they can't drift, and exist only to dodge a wire-format problem (PostgREST returns `geography` as an EWKB hex string, not `{ coordinates: [...] }`), not to cache a business rule. Don't read this as license to start storing other derived values.
+
 **Payment model (v1): no in-app payments**
 - Platform is coordination-only. Organizers collect payment externally (cash, Venmo, etc.).
 - No-show enforcement is social: late cancellations and no-shows affect the reliability score. Enough strikes = blocked from paid sessions.

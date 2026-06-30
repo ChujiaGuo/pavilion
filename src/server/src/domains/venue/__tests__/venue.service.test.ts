@@ -46,7 +46,8 @@ const VENUE_ROW = {
   address: '123 Main St',
   city: 'Vancouver',
   region: 'BC',
-  location: { coordinates: [-123.1207, 49.2827] },
+  lng: -123.1207,
+  lat: 49.2827,
   court_count: 4,
   surface_type: 'synthetic_mat',
   shuttle_type: 'feather',
@@ -99,14 +100,14 @@ describe('getVenueById', () => {
     });
   });
 
-  it('extracts lat and lng correctly from GeoJSON coordinates', async () => {
+  it('passes through the lng/lat generated columns unchanged', async () => {
     const chain = makeChain();
     mockFrom.mockReturnValue(chain);
     chain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
 
     const venue = await getVenueById('venue-1');
-    expect(venue?.lng).toBe(-123.1207); // coordinates[0]
-    expect(venue?.lat).toBe(49.2827);   // coordinates[1]
+    expect(venue?.lng).toBe(-123.1207);
+    expect(venue?.lat).toBe(49.2827);
   });
 
   it('maps venue_hours rows into the hours array', async () => {
