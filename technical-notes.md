@@ -38,7 +38,7 @@ Chose **Supabase (PostgreSQL)** over Firebase (Firestore) for the following reas
 - **Relational data model** — users → sessions → ratings → venues are deeply relational. SQL joins are natural; Firestore requires manual denormalization and multiple round trips for the same queries.
 - **Rating calculations** — weighted averages, session history, anomaly detection, distribution calibration all map cleanly to SQL. Firestore cannot do this without significant workarounds.
 - **Geospatial search** — PostGIS extension gives native "venues within X miles" queries. Firebase has no equivalent. (This is the stack-choice rationale, not a status report: the schema is ready — `venues.location geography(Point,4326)` with a GIST index — but `venue.service.ts` doesn't query it yet; `listVenues` only filters by city/type/drop-in availability. Not yet implemented.)
-- **Row Level Security (RLS)** — "default private" profile access enforced at the DB layer, not just application code. Harder to accidentally expose data.
+- **Row Level Security (RLS)** — "default private" profile access enforced at the DB layer, not just application code. Harder to accidentally expose data. (Stack-choice rationale, not a status report: no migration enables RLS or defines a policy yet, and adding one wouldn't currently change anything — `service_role` has Postgres's `BYPASSRLS` attribute unconditionally, so it ignores RLS policies regardless of whether they exist. All current authorization, including admin checks, is enforced in service-layer code instead. See "Admin access check" below. The actual risk this stack carries is the service-role key itself leaking — env-var-only, gitignored, never sent to the client — since a leak grants unrestricted DB access that no RLS policy could have stopped. RLS would earn its keep as defense-in-depth only if a future feature has the client talk to Supabase directly with a user JWT, e.g. Realtime chat subscriptions — that path bypasses the Hono server's checks entirely, so it'd need real policies, not just service-layer logic.)
 - **Marketplace readiness** — inventory, orders, commissions, and transactions are relational by nature. Adding the marketplace to Postgres is natural; retrofitting Firestore is painful.
 - **Open source / no vendor lock-in** — can self-host if pricing becomes an issue. Firebase is Google-only.
 - **Predictable pricing** — Supabase bills by compute/storage; Firebase bills per read/write (can spike unpredictably at scale).
@@ -144,6 +144,8 @@ Two environments: local dev (Supabase CLI) and prod (Supabase cloud + Railway/Re
 
 The remote tracks applied migrations in a `supabase_migrations` table — `db push` is idempotent and safe to run repeatedly.
 
+**Data API grants:** newly created tables aren't auto-exposed to Data API roles by default (`config.toml`'s `auto_expose_new_tables`, off by default — matches the cloud default, and the flag itself is slated for removal). Without an explicit `GRANT`, even `service_role` gets "permission denied" on a brand-new table via `supabase-js`/PostgREST — confirmed against a live local instance. `20260630160450_grant_service_role_access.sql` grants `service_role` access on the schema as it stood at that point, plus `ALTER DEFAULT PRIVILEGES` so future tables inherit it automatically — any new table added via a later migration doesn't need its own grant.
+
 **App deployment:** Railway/Render watches the repo and auto-deploys on push to `main`. No separate deploy step.
 
 ---
@@ -162,7 +164,7 @@ The remote tracks applied migrations in a `supabase_migrations` table — `db pu
 
 **Shuttle cost per person — not yet implemented:** see "Shuttle cost calculation" under Session & Venue below for the formula. `session.router.ts` is currently a stub with no service file, so nothing computes this yet.
 
-**Admin RLS pattern:** `EXISTS (SELECT 1 FROM admins WHERE user_id = auth.uid())`. Check this in any policy that gates admin-only writes.
+**Admin access check:** not an RLS policy (none exist in this schema — see "Row Level Security" above). Enforced in service-layer code via `isAdmin()` (`venue.service.ts`): a plain `select user_id from admins where user_id = :userId`. Follow this pattern — a service-layer query, not a DB policy — for any new admin-gated write.
 
 **Verification approval action:** on approving a `verification_requests` row, write `verified_tier` and `rating_floor` to the corresponding `profiles` row. `rating_floor` is set to 6.0 regardless of the tier granted (pro floor per product rules).
 
