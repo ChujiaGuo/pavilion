@@ -1,6 +1,6 @@
 # Database Schema
 
-_Last updated: 2026-06-29_
+_Last updated: 2026-06-30_
 
 PostgreSQL via Supabase. PostGIS extension enabled.
 
@@ -27,6 +27,8 @@ See `technical-notes.md` for lookup logic, derivation formulas, and access contr
 | `rating_floor` | numeric(5,2) | nullable |
 | `reliability_score` | numeric(5,2) | default 100 |
 | `placement_sessions_remaining` | integer | default 3 |
+| `demotion_protection_started_at` | timestamptz | nullable. Set when a vote first trends the player below their current grade's floor; cleared on recovery or release |
+| `promotion_protection_started_at` | timestamptz | nullable. Same as above, for trending at/above the next grade's ceiling |
 | `session_count` | integer | default 0 |
 | `deleted_at` | timestamptz | nullable. Soft delete — null means active. |
 | `created_at` | timestamptz | |

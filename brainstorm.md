@@ -1,6 +1,6 @@
 # Pavilion — Brainstorm Notes
 
-_Last updated: 2026-06-28_
+_Last updated: 2026-06-30_
 
 ---
 
@@ -130,6 +130,7 @@ Expanding to 10 (from the original 8) gives meaningful separation in the advance
 - **Unverified ceiling:** players without verification cap out at the top of grade 7 (elite amateur). They can be excellent, but "pro" is a verified status.
 - Verification is a one-time process per tier; once granted, the floor locks in permanently (even if the player is inactive for years)
 - **Verification prompt UX:** a player who organically reaches the 7.75–7.99 range should be prompted in-app to submit verification credentials — otherwise they hit an invisible ceiling with no path forward. The prompt should explain what verification requires and what unlocks.
+- **Tier-boundary protection:** crossing a whole-number grade line (e.g. 6.0 → 5.x) isn't instant — a player has to trend weaker (or stronger, for promotion) for a sustained window before the tier actually changes, rather than flickering across the line session to session. Demotion gets a generous 7-day window (a slump shouldn't tank you); promotion gets a shorter 3-day window — deliberately asymmetric in length, but applied to *both* directions, so the system doesn't become a one-way ratchet where tiers are easy to enter and sticky to leave. See technical-notes.md for the mechanism.
 
 **Safeguards against manipulation:**
 - Ratings far outside a rater's own calibration carry less weight (e.g., a 3.0 player calling a 7.0 "about equal" — their judgment at that level is unreliable)

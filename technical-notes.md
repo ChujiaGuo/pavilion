@@ -1,6 +1,6 @@
 # Technical Notes
 
-_Last updated: 2026-06-29_
+_Last updated: 2026-06-30_
 
 See `brainstorm.md` for product/idea context. This file is for architecture, implementation, and tech decisions only.
 
@@ -71,35 +71,58 @@ True microservices from day one add significant operational overhead (API gatewa
 
 ## Rating System
 
+Implemented in `src/server/src/domains/rating/`. Core scoring (`computeRatingUpdate`, `toRatingDisplay`) lives in `rating.algorithm.ts` — pure, no Supabase import — and is re-exported from `rating.service.ts`, which adds the DB orchestration (`submitRating`, `getRatingHistory`, etc.). The split means the algorithm is unit-testable, and runnable standalone (see `rating.demo.ts`), without a DB connection.
+
+**Scope note:** the `verification_requests` admin approve/reject flow (submit evidence → admin review → `verified_tier`/`rating_floor` written to `profiles`) is **not yet implemented** — those columns exist and are read/respected by the scoring algorithm (see Rating locks below), but nothing in the app currently writes them. Until that flow exists, they're only settable via direct DB access.
+
 **Data model considerations:**
 - Store raw internal score (float, 1.0–10.0+) separately from displayed tier/subtier
-- Display tier is derived: `grade = floor(score)`, `subtier = round((score % 1) / 0.25) + 1` (1–4)
-- Never expose raw float to the client — only grade + subtier label
+- Display tier is derived: `grade = floor(score)`, `subtier = round((score % 1) / 0.25) + 1` (1–4). Clamp the result to 1–4: a score near the top of a grade (e.g. `4.99`) can round up to subtier `5`, which isn't a valid subtier — clamp instead of letting it roll into the next grade
+- Display label format: `"Grade {grade} — {I|II|III|IV}"` (roman numeral per subtier)
+- Never expose raw float to the client — only grade + subtier label via `GET /api/ratings/user/:userId`
+- **Vote attribution is never exposed**, to anyone, via the API — not even to the ratee themselves. `session_rating_submissions` (rater_id ↔ vote) is write-only through the rating domain's endpoints. `GET /api/ratings/user/:userId/history` (self-only) surfaces only the aggregated per-session `score_before/score_after/delta` from `rating_history`, never which rater(s) drove it or what they voted
 - Keep full rating history per user (every session's delta) for audit, appeals, anomaly detection
 
-**Algorithm inputs per session:**
-- Group's average rating (anchor)
-- Each rater's relative vote (−2 to +2: much weaker → much stronger)
-- Rater's own grade (higher grade = higher weight, capped for upward boosts)
-- Rater-ratee familiarity score (diminishing returns on repeated pairings)
-- Placement flag (first 3 sessions = higher delta multiplier)
+**Scoring algorithm (per vote, computed and applied immediately on submission — not batched per session):**
+
+1. Vote → offset (internal-score units): `much_stronger=+1.0, stronger=+0.5, about_equal=0, weaker=-0.5, much_weaker=-1.0`. `did_not_play` is recorded but has no scoring or familiarity effect.
+2. `sessionAnchor` = average `internal_score` of all profiles with a `'going'` RSVP on the session.
+3. `impliedTarget = sessionAnchor + voteOffset` — the vote asserts the ratee belongs at this point relative to the group.
+4. Learning rate: `0.12` normally, `0.35` while the ratee is in placement (`placement_sessions_remaining > 0`).
+5. Weight = `proWeight * calibrationWeight * familiarityWeight`:
+   - **Pro weight:** rater grade `floor(raterScore) >= 8` → `1.5x`, but **only for downward/neutral votes** (`voteOffset <= 0`); upward votes from a pro get no boost (`1.0x`) — a pro can't unilaterally manufacture a rating increase, only corroborate one.
+   - **Calibration weight:** if `|raterScore - rateeScore| > 2.0` grades, weight decays linearly (`-0.25` per grade over the threshold) down to a floor of `0.25` — a rater's judgment is unreliable far outside their own level.
+   - **Familiarity weight (recency-adjusted):** `recencyFactor = 0.5 ^ (daysSinceLastRated / 60)` (60-day half-life, `0` if no prior pairing); `effectivePairCount = pair_count * recencyFactor`; `weight = 1 / sqrt(effectivePairCount + 1)`. Repeated *recent* pairings decay weight (the 15th game tells you little after the 5th), but a long gap resets it toward fresh — a rater's prior familiarity shouldn't keep suppressing their input if the ratee has had time to improve since.
+6. `delta = learningRate * weight * (impliedTarget - rateeScore)`, clamped to `±1.0` during placement / `±0.5` otherwise (hard cap on single-vote swings).
+7. `newScore = rateeScore + delta`, then: floor-clamp to `rating_floor` if set, ceiling-clamp to `7.99` if `verified_tier` is null, floor-clamp to `1.0`, round to 2 decimals. `delta` in `rating_history` is recomputed post-clamp (`newScore - rateeScore`) so the audit trail reflects what actually happened.
+8. `placement_sessions_remaining` decrements once per `(session, ratee)` — on the *first* submission row for that pair, regardless of how many raters eventually submit — not once per vote.
+
+**Anomaly detection (flag for review, not a block):**
+- `session_rating_submissions.flagged = true` when `|raterScore - rateeScore| > 2.0` grades (same calibration distance used for weight decay above)
+- **Out of scope / deferred:** same rater-ratee pair exceeding N sessions without fresh raters in between (partially mitigated by the recency-adjusted familiarity weight above, but not flagged), coordinated voting pattern detection, and global distribution recalibration — these need batch/cron analysis, not per-request logic
 
 **Distribution calibration:**
 - Target: slightly right-skewed normal, bulk of active users landing 3.5–4.5
-- May need a global recalibration mechanism if the distribution drifts over time (e.g., grade inflation)
-- Consider periodic anchoring: if distribution mean drifts above 5.0, apply a small correction factor
+- May need a global recalibration mechanism if the distribution drifts over time (e.g., grade inflation) — not implemented; would be a periodic admin/cron job, not part of the live scoring path
 
 **Rating locks:**
 - User record stores `verified_tier` (nullable) and `rating_floor` (nullable float)
 - On any rating update: `new_rating = max(new_rating, rating_floor)` if floor is set
-- `verified_tier` is set by admin/verification flow — not derivable from peer ratings alone
+- `verified_tier` is set by admin/verification flow — not derivable from peer ratings alone (flow not yet built, see Scope note above)
 - Unverified users are hard-capped at `7.99` — the algorithm simply cannot write a value ≥ 8.0 without a verified_tier on the record
-- Verification flow (to be designed): submit BWF ID / tournament results / credentials → admin review → tier granted → floor written to record
 
-**Anomaly detection (flag for review):**
-- Votes more than 2 grades away from rater's own calibration
-- Same rater-ratee pair exceeding N sessions within a rolling window without fresh raters in between
-- Coordinated voting patterns (group of users consistently voting the same direction on one person)
+**Tier-boundary protection (demotion/promotion):**
+- Problem: applying every vote's delta immediately means a player hovering right at a whole-number grade boundary can flicker back and forth across it session to session. A naive fix — delay the *displayed* grade while letting raw `internal_score` keep moving underneath — just relocates the problem: when the delayed change finally lands, the score has often drifted well past the boundary, so the displayed grade can skip subtiers or even whole grades instead of landing just past the line like a real single-tier transition should.
+- Fix: clamp the **raw score itself** at the grade boundary the moment a vote would cross it, instead of letting it drift while only the display lags. `profiles` stores `demotion_protection_started_at` / `promotion_protection_started_at` (both nullable timestamptz) to track this.
+- Mechanism (in `computeRatingUpdate`, after the existing absolute locks — `rating_floor`, the 7.99 ceiling, `MIN_SCORE` — are applied to get the natural new score): `currentGrade = floor(rateeScore)` (the score *before* this vote).
+  - **Demotion** triggers when the natural score would land `< currentGrade`. First trigger → pin at `currentGrade` exactly, start the clock. Each further sub-floor vote while the window hasn't elapsed → pin at `currentGrade` again (the clock is *not* reset per vote — it's measured from the first trend, not "consistently weak every single vote"). Once `DEMOTION_PROTECTION_WINDOW_DAYS` (7) full days have elapsed while still trending weak → release: score drops to `currentGrade - 0.01`, landing exactly at subtier IV of the grade below, never skipping.
+  - **Promotion** mirrors this exactly (own state, same shape) for crossing `>= currentGrade + 1`, pinning at `currentGrade + 1 - 0.01` while protected and releasing to exactly `currentGrade + 1` (subtier I) after `PROMOTION_PROTECTION_WINDOW_DAYS` (3) full days.
+  - **Windows are intentionally asymmetric** even though the mechanism is symmetric: demotion (7 days) is more generous than promotion (3 days) by design. Symmetric *mechanism* matters because demotion-only protection would make tiers easy to enter and sticky to leave — a one-way ratchet feeding the exact grade-inflation drift risk noted above. The shorter promotion window reflects that climbing should still require less sustained proof than falling gets forgiveness for.
+  - **Recovery cancels immediately:** if a vote pulls the natural score back across the boundary while protected, the protection clears right away and the natural score applies as-is — no protection debt carries over.
+  - **Skipped entirely during placement** (`isPlacement`) — placement explicitly wants fast convergence to true level, which this would fight.
+  - A single vote, however large, can only ever pin at the boundary — it cannot blow through multiple grades in one shot. This falls out of the design rather than needing a special case.
+  - Elapsed time is counted in **full calendar days, ignoring time-of-day** (e.g. 3:00pm June 1 → 2:30pm June 8 = 7 elapsed days, not 6) — deliberately coarser than, and independent of, the millisecond-precise familiarity-decay day count used elsewhere in the algorithm.
+- `toRatingDisplay` needs no changes — it already derives grade/subtier from whatever `internal_score` currently holds, and a pinned or just-released score produces a correct label through the existing formula. The mechanism is entirely contained to the score-update path; protection state is never exposed via the API.
 
 ---
 
@@ -133,9 +156,7 @@ The remote tracks applied migrations in a `supabase_migrations` table — `db pu
 
 **Write access for `venue_date_exceptions`:** claimed venue accounts (those with `claimed_by_account_id` set) only. For unclaimed venues, platform admins only.
 
-**Rating display derivation:** always computed server-side from `internal_score`. Never expose the raw float to the client.
-- `grade = floor(internal_score)`
-- `subtier = round((internal_score % 1) / 0.25) + 1` → integer 1–4
+**Rating display derivation:** see "Rating System" above for the full formula, clamping, and label format (`toRatingDisplay` in `rating.service.ts`). Always computed server-side from `internal_score` — never expose the raw float to the client.
 
 **Shuttle cost per person:** computed at read time, not stored. Formula: `ceil((player_count / 12) * (duration_minutes / 60)) * shuttle_tube_price / player_count`. Derives from `shuttle_tube_price` on the session, live RSVP count, and `duration_minutes`. Storing it would require keeping it in sync every time attendance changes.
 
