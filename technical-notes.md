@@ -75,6 +75,8 @@ Implemented in `src/server/src/domains/rating/`. Core scoring (`computeRatingUpd
 
 **Scope note:** the `verification_requests` admin approve/reject flow (submit evidence → admin review → `verified_tier`/`rating_floor` written to `profiles`) is **not yet implemented** — those columns exist and are read/respected by the scoring algorithm (see Rating locks below), but nothing in the app currently writes them. Until that flow exists, they're only settable via direct DB access.
 
+**Duplicate-vote race:** `submitRating`'s duplicate check is an app-level pre-read of `session_rating_submissions` before insert, not a DB-level catch — `session_rating_submissions` carries `UNIQUE(session_id, rater_id, ratee_id)` as the actual backstop. Two concurrent submissions for the same vote can both pass the pre-check; the insert's `{ error }` is checked and treated as `{ reason: 'duplicate' }` specifically so the loser of that race aborts before any score-update logic runs, rather than silently double-applying the vote. Covered by `src/server/src/__integration__/rating.integration.test.ts` (see Testing below) — this scenario only reproduces against a real unique-constraint violation, not the mocked unit suite.
+
 **Data model considerations:**
 - Store raw internal score (float, 1.0–10.0+) separately from displayed tier/subtier
 - Display tier is derived: `grade = floor(score)`, `subtier = round((score % 1) / 0.25) + 1` (1–4). Clamp the result to 1–4: a score near the top of a grade (e.g. `4.99`) can round up to subtier `5`, which isn't a valid subtier — clamp instead of letting it roll into the next grade

@@ -158,13 +158,18 @@ export async function submitRating(
 
   const flagged = Math.abs(raterScore - rateeScore) > ANOMALY_CALIBRATION_THRESHOLD;
 
-  await supabase.from('session_rating_submissions').insert({
+  const { error: insertError } = await supabase.from('session_rating_submissions').insert({
     session_id: sessionId,
     rater_id: raterId,
     ratee_id: rateeId,
     vote,
     flagged,
   });
+
+  // A concurrent submission can win the unique-constraint race even after
+  // passing the pre-check above — without this, the score update below would
+  // still apply on top of a vote that was never actually recorded.
+  if (insertError) return { ok: false, reason: 'duplicate' };
 
   if (vote === 'did_not_play') {
     return { ok: true };
