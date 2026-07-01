@@ -1,6 +1,6 @@
 # Technical Notes
 
-_Last updated: 2026-06-30_
+_Last updated: 2026-07-01_
 
 See `brainstorm.md` for product/idea context. This file is for architecture, implementation, and tech decisions only.
 
@@ -68,6 +68,62 @@ This is the single canonical copy of this table — `README.md` and `CLAUDE.md` 
 
 - **Modular from the start** — marketplace is deferred but must be addable without reworking core. Keep shop/inventory/payment concerns as a clearly bounded domain stub, even if the code doesn't exist yet.
 - **No booking transactions in v1** — the app is a coordination layer. No payment flows for venue bookings or for paid (organizer-hosted) sessions; those are deferred to v2 (see brainstorm.md Future Features Roadmap). Organizers collect payment externally.
+
+---
+
+## API Endpoints
+
+All routes are mounted under `/api/<domain>`. **Auth** column: `yes` = Bearer token required (returns 401 otherwise); `no` = public.
+
+### `/api/users`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/:id` | yes | Get user profile. Returns 404 for private profiles viewed by non-owners |
+| `PATCH` | `/:id` | yes | Update own profile fields (`displayName`, `photoUrl`, `city`, `region`, `preferredFormats`, `playStyle`, `privacyLevel`). Returns 403 if patching a different user |
+| `DELETE` | `/:id` | yes | Soft-delete own account (`deleted_at` timestamp). Returns 403 if deleting a different user |
+
+### `/api/venues`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/` | no | List venues. Query params: `city`, `type` (`club`/`rec_center`/`community_center`/`gym`), `drop_in` (`true`/`false`) |
+| `GET` | `/:id` | no | Get venue with hours |
+| `POST` | `/` | yes | Create venue (admin only). Body includes `lat`/`lng` — stored as PostGIS point |
+| `PATCH` | `/:id` | yes | Update venue fields. Admin can edit any; claimed owner can only edit their own |
+| `POST` | `/:id/claim` | yes | Claim an unclaimed venue. Atomic check-and-set — concurrent claims are safe |
+| `POST` | `/:id/suggest-edit` | yes | Submit a field edit suggestion (`fieldName`, `suggestedValue`). Inserts a `venue_edit_suggestions` row |
+
+### `/api/sessions`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/` | no | List sessions. Query params: `status` (default `upcoming`), `venue_id`, `organizer_id`, `attendee_id`, `date_from`, `date_to`, `city`, `region`, `skill_min`, `skill_max`. Returns only `public` sessions unless `organizer_id` is set. `attendee_id` enforces privacy — private profiles return `[]` unless caller's Bearer token matches the target. `skill_min`/`skill_max` use overlap semantics (`session.skill_max >= skill_min` AND `session.skill_min <= skill_max`). `city`/`region` resolve to venue IDs first (sessions without a `venue_id` are excluded when these filters are active) |
+| `POST` | `/` | yes | Create session. Returns `201` with `{ session, warning? }`. `warning: "skill_range_wide"` if organizer grade is >1.5 from both ends of the skill range |
+| `GET` | `/:id` | conditional | Get session by ID. `invite_only` sessions require a valid Bearer token (403 without one, any authenticated user — not just the organizer); `public` sessions remain open to unauthenticated callers |
+| `PATCH` | `/:id` | yes | Update session fields (organizer only). Folded ownership check — 0-row result = 404 |
+| `DELETE` | `/:id` | yes | Cancel session — sets `status = "cancelled"` (organizer only, `upcoming` sessions only) |
+| `PATCH` | `/:id/status` | yes | Advance session status: `upcoming → active → completed`. Organizer only. Returns 409 for invalid transitions (e.g. `completed → active`) |
+| `GET` | `/:id/rsvps` | conditional | List active RSVPs (`going` + `waitlisted`) ordered by `joined_at`. Excludes attendees with a `private` profile. `invite_only` sessions require a valid Bearer token (403 without one); `public` sessions remain open to unauthenticated callers |
+| `GET` | `/:id/rsvp` | yes | Get caller's own RSVP status. Returns `{ status, joinedAt, waitlistPosition? }` for `going`/`waitlisted`/`attended`/`no_show`, or 404 if no active RSVP (`waitlistPosition` only present for `waitlisted`) |
+| `POST` | `/:id/rsvp` | yes | Join session. Returns `{ status: "going"\|"waitlisted", warning? }`. Enforces skill range and capacity. `invite_only` is a visibility/discoverability control only — it doesn't restrict who can join |
+| `DELETE` | `/:id/rsvp` | yes | Cancel RSVP. If user was `going`: promotes oldest waitlisted user; deducts 5 reliability points if within 12 hours of start. Returns `{ success: true, warning? }` — `warning: "penalty_not_applied"` if the cancel committed but the reliability-score deduction failed |
+| `POST` | `/:id/attendance` | yes | Mark attendance after session completes (organizer only, session must be `completed`). Body: `{ attendedUserIds: string[] }`. Idempotent — only processes RSVPs still in `going` state. No-shows (going but not in list) get RSVP status `no_show` and lose 10 reliability points. Attended users get status `attended`. Returns `{ attended, noShows }` |
+
+### `/api/ratings`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/submit` | yes | Submit a peer rating vote. Body: `{ sessionId, rateeId, vote }`. Vote options: `much_stronger`, `stronger`, `about_equal`, `weaker`, `much_weaker`, `did_not_play` |
+| `GET` | `/user/:userId` | yes | Get a user's rating display (`grade`, `subtier`, `label`, `isProvisional`). Respects privacy level — returns 404 for private profiles viewed by non-owners |
+| `GET` | `/user/:userId/history` | yes | Get own rating history (score before/after/delta per session). Self-only — returns 403 for other users |
+
+### `/api/messaging` _(stub — not yet implemented)_
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/token` | — | Generate a Stream Chat user token |
+| `POST` | `/session/:sessionId/channel` | — | Provision a Stream Chat channel for a session (`session_{sessionId}` convention) |
 
 ---
 
@@ -144,6 +200,8 @@ Two environments: local dev (Supabase CLI) and prod (Supabase cloud + Railway/Re
 
 **Data API grants:** newly created tables aren't auto-exposed to Data API roles by default (`config.toml`'s `auto_expose_new_tables`, off by default — matches the cloud default, and the flag itself is slated for removal). Without an explicit `GRANT`, even `service_role` gets "permission denied" on a brand-new table via `supabase-js`/PostgREST — confirmed against a live local instance. `20260630160450_grant_service_role_access.sql` grants `service_role` access on the schema as it stood at that point, plus `ALTER DEFAULT PRIVILEGES` so future tables inherit it automatically — any new table added via a later migration doesn't need its own grant.
 
+**RPC function grants — the opposite default from tables, and it doesn't inherit the grant above:** Postgres grants `EXECUTE` on a newly created function to `PUBLIC` by default, and `config.toml` exposes the `public` schema over PostgREST — so an un-revoked `SECURITY DEFINER` function is callable by `anon`/`authenticated` via `/rest/v1/rpc/<fn>` with just the anon key, bypassing whatever app-layer checks the caller assumed protected it. `20260701142827_lock_down_session_rpcs.sql` revokes `EXECUTE` on `join_session_atomic`, `cancel_rsvp_and_promote`, and `decrement_reliability_score` (see "RSVP & attendance concurrency safety" below) from `PUBLIC`/`anon`/`authenticated` and grants it only to `service_role`. This is a per-function grant, not schema-level — any new `SECURITY DEFINER` RPC needs its own explicit revoke/grant pair, the `ALTER DEFAULT PRIVILEGES` trick above only covers tables/sequences.
+
 **App deployment:** Railway/Render watches the repo and auto-deploys on push to `main`. No separate deploy step.
 
 ---
@@ -182,29 +240,63 @@ Two environments: local dev (Supabase CLI) and prod (Supabase cloud + Railway/Re
 
 **Waitlist ordering:** determined by `session_rsvps.joined_at` ascending. When a `'going'` RSVP is cancelled, promote the oldest `'waitlisted'` row for that session.
 
+**RSVP & attendance concurrency safety — implemented as Postgres functions, called via `supabase.rpc(...)` from `session.service.ts`** (`supabase/migrations/20260701000000_atomic_score_decrement.sql`, `20260701000001_atomic_rsvp_operations.sql`, `20260701150000_skip_promotion_on_dead_sessions.sql`): naive read-then-write JS for capacity checks, waitlist promotion, and reliability-score deductions is racy under concurrent requests — overbooking past `max_players`, double-promoting the same waitlisted user, or double-applying a penalty. Fixed by moving each check-and-write into a single-transaction SQL function instead:
+- `join_session_atomic(session_id, user_id)` locks the `sessions` row (`FOR UPDATE`), counts `going` RSVPs, and inserts/upserts the RSVP with the resulting status in one transaction — two concurrent joins for the last slot are serialized by the row lock, not by JS.
+- `cancel_rsvp_and_promote(session_id, user_id)` takes the same `FOR UPDATE` lock on `sessions`, so all concurrent cancellations for a session serialize through it, then cancels the RSVP and promotes the oldest `'waitlisted'` row in the same transaction — but only when the session's `status` is `'upcoming'` or `'active'`; cancelling on a `'cancelled'`/`'completed'` session still cancels the RSVP but skips promotion, since promoting someone onto a dead session would create a phantom RSVP that could later earn a no-show penalty. Deliberately avoids `SELECT ... FOR UPDATE SKIP LOCKED` on the waitlist row — if the transaction holding that lock had rolled back, `SKIP LOCKED` would already have promoted a lower-priority user, permanently breaking FIFO order.
+- `decrement_reliability_score(uids, points)` applies `GREATEST(0, reliability_score - points)` in a single `UPDATE`, avoiding a read-then-write race between overlapping late-cancel/no-show penalties for the same profile.
+
+All three are `SECURITY DEFINER` and locked down to `service_role` only — see "RPC function grants" under Environments above. App-layer authorization (ownership, skill gating) still lives entirely in `session.service.ts`; these functions only make the capacity/promotion/decrement step atomic, they don't re-check who's allowed to call them.
+
+`markAttendance` (`session.service.ts`) has its own, JS-level version of this problem: the read of `going` RSVPs used to decide who attended/no-showed and the writes that flip their status aren't one atomic unit, so two overlapping calls (e.g. a client retry) could both read the same snapshot and both fire the no-show penalty for the same user. Fixed without a new RPC — both the attended-update and no-show-update queries add `.eq('status', 'going')` and `.select('user_id')`, so each call only sees the rows *it* actually flipped; the reliability-score RPC and the `{ attended, noShows }` counts are computed from that returned set, not the earlier read, so a call whose UPDATE affects zero rows (because a concurrent call already flipped them) naturally skips the penalty instead of double-deducting it.
+
+`cancelRsvp`'s late-cancel penalty RPC is best-effort once the cancel itself has committed: if `decrement_reliability_score` errors after `cancel_rsvp_and_promote` already succeeded, the function logs the error and returns `{ ok: true, warning: 'penalty_not_applied' }` rather than reporting the cancel as failed — the RSVP really is cancelled at that point, so `{ ok: false }` would be a lie. `markAttendance`'s no-show branch instead returns `{ ok: false, reason: 'write_failed' }` on the same RPC error, since nothing there has an equivalent "already committed, can't take it back" constraint.
+
+Verified against a real concurrent race (not just mocked RPC calls) in `src/server/src/__integration__/session.integration.test.ts` — see Testing above.
+
 ---
 
 ## Session & Venue
 
 **`venues.lng`/`lat` are stored, unlike other derived values — and that's fine:** the broader rule (see CLAUDE.md) is that *business-logic* derivations (rating tier, shuttle cost) are computed server-side on every read, never cached, to avoid staleness. `lng`/`lat` are a different thing: `STORED GENERATED` columns that Postgres keeps in lockstep with `location` on every write — they can't drift, and exist only to dodge a wire-format problem (PostgREST returns `geography` as an EWKB hex string, not `{ coordinates: [...] }`), not to cache a business rule. Don't read this as license to start storing other derived values.
 
+**Session domain — implemented in `src/server/src/domains/session/`:**
+- `session.service.ts` + `session.router.ts`, with unit tests in `__tests__/`
+- `organizer_id` is always required — even drop-in sessions need a poster (the person who creates it). Venue-owned standing sessions can be created by admins with their own `organizer_id`. Revisit when the venue-account flow is built.
+- Recurring sessions: `is_recurring` and `recurring_cron_expr` are stored on create; child-session auto-spawning is deferred (no cron job yet).
+- `profiles.session_count` is not incremented by the RSVP flow — it requires a separate post-session reconciliation process (not yet built).
+- No-show *marking* is manual: the organizer calls `POST /:id/attendance` after the session completes (see API table). Automatic no-show detection (without organizer input) is a separate background-process concern, not yet built.
+
 **Payment model (v1): no in-app payments**
 - Platform is coordination-only. Organizers collect payment externally (cash, Venmo, etc.).
 - No-show enforcement is social: late cancellations and no-shows affect the reliability score. Enough strikes = blocked from paid sessions.
-- 12-hour cancellation window measured from session start time.
-- Waitlist fills dropped spots automatically.
+- 12-hour cancellation window measured from session start time: cancelling within 12 hours of `starts_at` deducts 5 points from `profiles.reliability_score` (clamped to 0).
+- No-show penalty: deducts 10 points from `profiles.reliability_score` (clamped to 0) when the organizer marks a `going` attendee as absent via `POST /:id/attendance`.
+- Waitlist fills dropped spots automatically (oldest `'waitlisted'` RSVP by `joined_at` is promoted to `'going'` when a `'going'` RSVP is cancelled).
 
 In-app payments (Stripe Connect) and shuttle cost auto-calculation are both deferred — see brainstorm.md's Future Features Roadmap for the design detail.
 
-**Skill range enforcement (asymmetric) — not yet implemented, `session` domain is still a router-only stub:**
-- Session range stored as `[min_grade, max_grade]` in decimal
-- Organizer's own rating must be within ~1.5 grades of at least one end of the range they set
-- Player join check is directional:
-  - Playing up (player < min_grade): strict. `min_grade - player_rating > 1.5` → hard block; else → warning
-  - Playing down (player > max_grade): loose. Higher threshold before hard block (TBD — e.g., 3.0 grades); warning shown at any overage but framed as informational
-- Organizer receives notification when a player joins who is meaningfully above the session ceiling
-- Organizer can toggle "strict range" mode to apply symmetric enforcement in both directions
-- **Rating dampening for out-of-range players:** if `player_rating - session_max > threshold` (playing significantly down), exclude or heavily discount that player's ratings of others and others' ratings of them for this session. The grade gap makes the relative assessments unreliable and could unfairly penalize lower-level players. Threshold TBD — likely ~1.5 grades above ceiling.
+**Skill range enforcement (asymmetric) — implemented in `session.service.ts` (`joinSession`):**
+- Session range stored as `[skill_min, skill_max]` in decimal (numeric columns)
+- **Organizer range warning (on create):** if the organizer's `floor(internal_score)` is >1.5 grades from both `skill_min` and `skill_max`, `createSession` succeeds but returns `warning: 'skill_range_wide'`. Not a block — organizers can host sessions outside their exact grade (e.g., an advanced player hosting a beginner drop-in).
+- **Player join check (`joinSession`):**
+  - Playing up (`skill_min - player_score > 1.5`): hard block (`skill_blocked`)
+  - Playing up (0 < `skill_min - player_score` ≤ 1.5): allowed with `warning: 'playing_up'`
+  - Playing down (`player_score - skill_max > 3.0`): hard block (`skill_blocked`)
+  - Playing down (0 < `player_score - skill_max` ≤ 3.0): allowed with `warning: 'playing_down'`
+  - Organizer joining their own session: skill check skipped entirely
+- **Not yet implemented:** organizer notification when a high-rated player joins; `strict_range` toggle (column exists, not enforced); rating dampening for out-of-range players (rating domain's responsibility — threshold TBD ~1.5 grades above ceiling)
+
+---
+
+## Known Issues
+
+Confirmed defects deferred from v1. Fix before traffic warrants it; do not rediscover these as new bugs.
+
+| ID | Location | Symptom | Trigger | Fix when |
+|---|---|---|---|---|
+| KI-001 | `session.service.ts:509, 543–549`, `20260701000001_atomic_rsvp_operations.sql:14–21` | A join racing a concurrent cancel can insert an RSVP on a `cancelled` or `completed` session. `join_session_atomic` locks the row for capacity but never re-reads `status` — it only checks existence. The `status !== 'upcoming'` guard lives in JS, outside the lock, so a cancel that commits between the JS check and the RPC call wins. | Concurrent `POST /:id/rsvp` + `DELETE /:id` (or `PATCH /:id/status`) within the same ~10ms window. Requires genuine concurrency. | Sessions fill fast enough that concurrent join demand is routine |
+| KI-002 | `session.router.ts:3, 90–96` | Router imports `supabase` directly to resolve an optional caller identity (`supabase.auth.getUser`) in the `GET /` attendee-filter path. No exploitable bug — the call is auth-only, not a data query — but it is the only router in the codebase that bypasses the service layer for auth resolution, setting a precedent that erodes the domain boundary over time. | Any future extension of the optional-auth pattern. | Before auth resolution logic grows more complex |
+| KI-003 | `session.router.ts` `PATCH /:id/status` handler; `session.service.ts` `progressSessionStatus()` | A concurrent `PATCH /:id/status` race-loser receives a `404 Not Found` instead of the more accurate `409 Conflict` (`invalid_transition`). The service returns `{ ok: false, reason: 'not_found' }` when the row it expected is gone or its status has already advanced, conflating two distinct failure modes. No data is corrupted — the error is purely cosmetic. | Two callers advance the same session status simultaneously within the same ~10ms window. Requires genuine concurrency. | If clients start branching on the 404 vs 409 distinction, or before adding retry logic |
 
 ---
 

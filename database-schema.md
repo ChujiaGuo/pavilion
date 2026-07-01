@@ -149,7 +149,7 @@ UNIQUE `(venue_id, date)`.
 |---|---|---|
 | `session_id` | uuid | FK → sessions |
 | `user_id` | uuid | FK → profiles |
-| `status` | text | `'going'`, `'waitlisted'`, `'cancelled'` |
+| `status` | text | `'going'`, `'waitlisted'`, `'cancelled'`, `'attended'`, `'no_show'`. No DB-level CHECK constraint — enforced at the app layer (`RsvpStatus` in `@pavilion/types`) |
 | `joined_at` | timestamptz | |
 
 Composite PK `(session_id, user_id)`.

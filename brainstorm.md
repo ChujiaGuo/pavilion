@@ -43,7 +43,7 @@ Drop-in badminton in the US is unstructured: mismatched skill levels, uncoordina
 
 **Session options:**
 - Format: casual rotation, king of the court, round robin (organizer picks)
-- Visibility: public (anyone can find and join) vs. invite-only
+- Visibility: public (discoverable in listings) vs. invite-only (hidden from public listings, but anyone with the session link/ID can still view and join — v1 has no allowlist mechanism)
 - Court count drives max capacity: e.g. 3 courts = 12 players (or up to 16 with rotation)
 - Recurring sessions: weekly/biweekly repeat so organizers don't re-post manually
 
@@ -224,6 +224,7 @@ Everything not in MVP Scope (v1) below lives here. `technical-notes.md` only doc
 
 | Feature | Description | Version |
 |---|---|---|
+| SSO (Google / OAuth) | Social sign-in via Google (and optionally other OAuth providers). Requires enabling the provider in Supabase dashboard + `supabase/config.toml` for local dev, and adding `signInWithOAuth` on the client. Server auth middleware is already provider-agnostic. | v1 |
 | In-app payments for paid sessions | Platform escrow model: collect payment at RSVP, hold until session, release to organizer. Requires Stripe Connect (Express accounts) — organizers onboard with identity + banking info. Forfeited deposits on late cancel/no-show go to organizer automatically. Waitlist spot-transfer: canceller retains their payment, waitlister pays canceller directly for the spot. | v2 |
 | Shuttle cost auto-calculation | Suggested per-person shuttle contribution computed from player count × duration → tube count → cost split (`tubes_needed = ceil((player_count / 12) * hours)`, `shuttle_fee_per_person = (tubes_needed * tube_price) / player_count`). Informational only, no in-app payment. v1 still has the raw `shuttle_policy`/`shuttle_tube_price` fields — only the computed suggestion is deferred. | TBD |
 | Marketplace | Full commerce platform — see dedicated section below. | TBD |
