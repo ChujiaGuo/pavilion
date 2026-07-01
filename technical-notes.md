@@ -71,6 +71,12 @@ This is the single canonical copy of this table — `README.md` and `CLAUDE.md` 
 
 ---
 
+## Auth
+
+**Email/password + Google OAuth (v1 scope, not yet implemented):** Supabase Auth handles both. Google sign-in requires enabling the provider in the Supabase dashboard (and `supabase/config.toml` for local dev), plus adding `signInWithOAuth` on the client. `src/server/src/middleware/auth.ts` validates the bearer token generically regardless of which provider issued it — no server-side change needed to add a provider.
+
+---
+
 ## API Endpoints
 
 All routes are mounted under `/api/<domain>`. **Auth** column: `yes` = Bearer token required (returns 401 otherwise); `no` = public.
@@ -213,6 +219,8 @@ Two environments: local dev (Supabase CLI) and prod (Supabase cloud + Railway/Re
 **Integration suite (`npm run test:integration --workspace=server`, `src/server/src/__integration__/`):** runs the real `*.service.ts` code against a real local Postgres, for the specific class of bug mocks structurally can't catch — constraint violations, real PostgREST response shapes, untested migrations. Deliberately light: a couple of targeted tests, not a parallel copy of the unit suite. Requires `supabase start` (Docker) and `src/server/.env.local` populated from its printed output, same as `dev`. Separate `vitest.integration.config.ts` (`fileParallelism: false` — tests share DB state via truncate-between-tests cleanup, see below) so the default `npm test` stays Docker-free.
 
 **Fixtures (`src/server/src/test/integration-helpers.ts`):** `profiles.id` references `auth.users(id)`, with a trigger auto-creating the `profiles` row on insert — so test users must go through `supabase.auth.admin.createUser(...)`, never a direct `profiles` insert. `createTestUser` wraps that plus an optional `profiles` patch (e.g. `placementSessionsRemaining: 0` to opt a fixture out of placement-mode scoring, matching the unit suite's baseline assumptions).
+
+**Frontend e2e (`npm run test:e2e --workspace=client`, `src/client/e2e/`):** Playwright, configured in `src/client/playwright.config.ts`. `webServer` auto-starts `next dev` against `http://localhost:3000` if nothing's already listening there (`reuseExistingServer: true` outside CI, so it won't collide with a dev server you already have running). Two projects run every spec: `chromium` (desktop) and `mobile-chromium` (`Pixel 7` viewport) — mirrors the mobile-first priority from "Platform" above. Only Chromium is installed locally (`npx playwright install chromium`); add Firefox/WebKit projects and run `npx playwright install` for those engines if cross-browser coverage becomes a requirement.
 
 **Isolation — truncate via a direct `pg` connection, not transaction rollback:** PostgREST executes each HTTP request as its own transaction, so multi-call flows like `submitRating` (several sequential `supabase.from()` calls) can't be wrapped in one outer transaction without bypassing PostgREST — which would defeat testing through the real client. Instead, `afterEach` runs `TRUNCATE TABLE auth.users, venues CASCADE` over a raw `pg.Client` (used only for this, never by code under test): `CASCADE` follows the FK graph regardless of each FK's own `ON DELETE` action, reaching every dependent table without hand-maintaining a deletion order; `venues` is listed explicitly since unclaimed venues aren't reachable from `auth.users`. No `RESTART IDENTITY` — every table uses a uuid PK, and the local `postgres` role isn't a true superuser, so it can't reset sequences it doesn't own (e.g. auth's internal `refresh_tokens_id_seq`, which `CASCADE` would otherwise try to touch).
 

@@ -1,6 +1,6 @@
 # Pavilion — Brainstorm Notes
 
-_Last updated: 2026-06-30_
+_Last updated: 2026-07-01_
 
 ---
 
@@ -224,7 +224,6 @@ Everything not in MVP Scope (v1) below lives here. `technical-notes.md` only doc
 
 | Feature | Description | Version |
 |---|---|---|
-| SSO (Google / OAuth) | Social sign-in via Google (and optionally other OAuth providers). Requires enabling the provider in Supabase dashboard + `supabase/config.toml` for local dev, and adding `signInWithOAuth` on the client. Server auth middleware is already provider-agnostic. | v1 |
 | In-app payments for paid sessions | Platform escrow model: collect payment at RSVP, hold until session, release to organizer. Requires Stripe Connect (Express accounts) — organizers onboard with identity + banking info. Forfeited deposits on late cancel/no-show go to organizer automatically. Waitlist spot-transfer: canceller retains their payment, waitlister pays canceller directly for the spot. | v2 |
 | Shuttle cost auto-calculation | Suggested per-person shuttle contribution computed from player count × duration → tube count → cost split (`tubes_needed = ceil((player_count / 12) * hours)`, `shuttle_fee_per_person = (tubes_needed * tube_price) / player_count`). Informational only, no in-app payment. v1 still has the raw `shuttle_policy`/`shuttle_tube_price` fields — only the computed suggestion is deferred. | TBD |
 | Marketplace | Full commerce platform — see dedicated section below. | TBD |
@@ -272,6 +271,7 @@ Everything not in MVP Scope (v1) below lives here. `technical-notes.md` only doc
 
 ## MVP Scope (v1)
 
+- Account creation & auth (email/password + Google OAuth sign-in)
 - Venue discovery (map, listing, venue accounts, suggest-an-edit)
 - Session creation and RSVPs (free drop-in + organizer-hosted — no in-app payments)
 - User profiles (rating, reliability score, privacy controls)

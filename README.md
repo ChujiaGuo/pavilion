@@ -10,6 +10,7 @@ A platform for organizing badminton get-togethers — venue discovery, skill-mat
 /
 ├── CLAUDE.md             # Instructions for Claude Code when working in this repo
 ├── brainstorm.md         # Product brainstorming notes, feature decisions, future features roadmap
+├── design-system.md      # Front-end design decisions: component library, UX/copy principles
 ├── technical-notes.md    # Architecture decisions, stack rationale, technical specs
 ├── database-schema.md    # Full database table definitions and indexes
 ├── supabase/
@@ -19,6 +20,8 @@ A platform for organizing badminton get-togethers — venue discovery, skill-mat
     ├── packages/
     │   └── types/        # @pavilion/types — shared TypeScript types used by client and server
     ├── client/            # @pavilion/client — Next.js frontend (TypeScript, Tailwind)
+    │   ├── playwright.config.ts
+    │   └── e2e/           # Playwright e2e specs — see "Testing" below
     └── server/            # @pavilion/server — Node/Hono backend (TypeScript)
         └── src/
             ├── domains/    # user, venue, session, rating, messaging, marketplace — see technical-notes.md "Architecture" for responsibilities
@@ -63,9 +66,11 @@ Migrations live in `supabase/migrations/` and are committed to git. `db push` on
 ```bash
 npm test --workspace=server              # mocked unit tests — fast, no Docker required
 npm run test:integration --workspace=server  # real Postgres — needs `supabase start` + src/server/.env.local
+npm run test:e2e --workspace=client       # Playwright e2e — auto-starts the Next.js dev server if one isn't already running
+npm run test:e2e:ui --workspace=client    # same, in Playwright's interactive UI mode
 ```
 
-The integration suite runs the actual service code against a local Postgres instance to catch what mocks can't (constraint violations, real PostgREST response shapes, untested migrations). See `technical-notes.md` "Testing" for how it's isolated and why it's structured this way.
+The integration suite runs the actual service code against a local Postgres instance to catch what mocks can't (constraint violations, real PostgREST response shapes, untested migrations). See `technical-notes.md` "Testing" for how it's isolated and why it's structured this way, and for the Playwright setup (browsers, projects, config location).
 
 ## Production setup (one-time)
 
