@@ -14,8 +14,37 @@ Mobile-first responsive web — see `technical-notes.md`'s "Platform" section fo
 
 ## Component Library
 
-- **shadcn/ui + Radix primitives** on top of Tailwind v4 (already a `client` dependency). Chosen because the app's core flows — signup, the multi-step onboarding quiz, RSVP — are form-heavy and benefit from Radix's built-in accessibility (focus management, keyboard nav, ARIA) rather than hand-rolling form/dialog/input components.
-- Visual identity (color palette, typography, logo) — not yet decided. Add here once chosen; don't let it drift into component code as an unstated default.
+- **shadcn/ui + Radix primitives** on top of Tailwind v4 — chosen (not yet installed) for when the form-heavy flows get built (signup, the multi-step onboarding quiz, RSVP), since Radix's built-in accessibility (focus management, keyboard nav, ARIA) beats hand-rolling form/dialog/input components. The landing page didn't need it (no forms/dialogs), so it was built with plain Tailwind; install it when the first form-heavy flow is implemented.
+- Tailwind v4 requires `@tailwindcss/postcss` in `client`'s devDependencies plus a `postcss.config.mjs` — without both, Tailwind classes silently no-op (the original placeholder page had Tailwind classes that were never actually being applied). Now installed and configured.
+- Logo — not yet decided.
+
+---
+
+## Color Palette
+
+- **Primary — `#2A6F41` (deep forest green):** CTA buttons, links, active states. Same hue family as the secondary mint but dark/saturated enough to give real contrast against white — needed for the single-primary-CTA principle below to actually read as clickable.
+- **Secondary/background accent — `#ADEBB3` (mint green):** one of the stops in the page's background gradient (see Layout Philosophy below), plus low-opacity background typography (`text-primary/10`). Too light and low-contrast on its own to work as a button fill (fails against both dark and white text), so it stays a background/accent color rather than the primary.
+- Neutral text/background (grays, off-white) not yet decided — use shadcn defaults until specified here.
+
+---
+
+## Typography
+
+- **Nunito** (via `next/font/google`), applied globally on `<body>` in `layout.tsx`. Rounded terminals give the friendly, casual-sport feel the app is going for, and it stays readable at body-copy sizes (unlike more decorative rounded fonts that only work as display type).
+
+---
+
+## Layout Philosophy — Editorial, Not Boxed
+
+Superseded the earlier card/shadow/per-section-background approach below after it read as generic "AI-generated" template stacking. Current direction:
+
+- **No bounding boxes.** Don't wrap groups of content in cards, borders, or `shadow-*` containers. Separate ideas with whitespace, type scale, and alignment instead of physical containment. (`How it works`'s three items are typographic rows — a giant faint index numeral + heading + copy — not a 3-card grid.)
+- **One continuous canvas, not stacked colored sections.** `<main>` carries a single multi-stop background gradient (mint → white → gray → mint → white) that the whole page scrolls through; individual `<section>`s stay transparent so nothing reads as a discrete block. The one exception is the closing CTA, which bleeds from transparent into solid dark green via its own gradient so the canvas organically deepens rather than hard-cutting to a colored box.
+- **Background typography for texture.** Oversized, low-opacity (`text-primary/10`, `text-white/5`) numerals or words, wrapped in `aria-hidden` containers, sit behind real copy (e.g. "RALLY" behind the hero, "10" behind the rating section). Nothing — decorative or real — is allowed to touch a viewport or section edge: the shared `decor` wrapper (`page.tsx`) constrains these to the center 75% of the section with a vertical inset from top/bottom, clipping via `overflow-hidden` rather than bleeding off-canvas.
+- **Real content lives in a center 2/3 column on desktop** (the shared `content` wrapper, `lg:w-2/3 lg:mx-auto`), so wide viewports don't stretch text into an awkward edge-to-edge spread. Below `lg`, content uses the full width with `px-6`/`sm:px-12` padding.
+- **Asymmetry over centered/grid-locked layouts.** Hero headline anchors left across 8 of 12 columns; subhead+CTA sit offset lower-right in the remaining 4. `How it works` rows alternate `justify-end`/left on odd/even index. Launch-region cities are a right-aligned flowing line against a left-aligned label, not centered chips.
+- **Fluid, uneven spacing.** Section padding ranges roughly `py-20` to `py-48`; tight-tracked uppercase eyebrow labels (`text-sm tracking-[0.2em]`) sit next to `text-7xl` headlines — deliberate contrast, not a uniform scale.
+- shadcn/ui still isn't installed (see Component Library above) — the landing page has no forms/dialogs, so there's nothing to re-skin yet. Revisit its default styling (strip borders/shadows to match this direction) whenever the first form-heavy flow pulls it in.
 
 ---
 
@@ -30,7 +59,7 @@ Mobile-first responsive web — see `technical-notes.md`'s "Platform" section fo
 
 ## Content vs. Data
 
-Prefer hardcoded front-end content over a database table until there's an operational reason to make it dynamic. Example: the current launch-region list (Central Maryland: Rockville, Gaithersburg, Silver Spring, Columbia) is a static list in the client, not schema-driven — there's no admin/user-facing reason yet for it to live in a table. Revisit only if an actual "notify me" waitlist capture gets built (that would need its own small table, unrelated to `venues`).
+Prefer hardcoded front-end content over a database table until there's an operational reason to make it dynamic. Example: the landing page's launch-region copy (currently just "Maryland" — see `brainstorm.md`'s Go-to-Market Thoughts for the actual target-city list, which stays more specific than the public-facing copy) is a static string in the client, not schema-driven — there's no admin/user-facing reason yet for it to live in a table. Revisit only if an actual "notify me" waitlist capture gets built (that would need its own small table, unrelated to `venues`).
 
 ---
 

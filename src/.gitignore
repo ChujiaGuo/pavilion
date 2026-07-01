@@ -11,3 +11,5 @@ dist/
 /client/playwright-report/
 /client/blob-report/
 /client/playwright/.cache/
+
+_tmp_screenshot.mjs
