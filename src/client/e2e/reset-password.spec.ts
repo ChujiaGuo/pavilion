@@ -44,7 +44,9 @@ test('resets a password end-to-end via the emailed link and signs in with the ne
 
   await confirmPasswordField.fill(newPassword);
   await page.getByRole('button', { name: 'Save new password' }).click();
-  await page.waitForURL('/');
+  // Reset success pushes to /home, but this fixture never completed
+  // onboarding, so /home's own auth guard immediately bounces it onward.
+  await page.waitForURL('/onboarding/quiz');
 
   await page.context().clearCookies();
   await page.goto('/login');

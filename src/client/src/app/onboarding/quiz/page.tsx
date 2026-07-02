@@ -30,7 +30,7 @@ export default function OnboardingQuizPage() {
         return;
       }
       if (session.user.app_metadata?.onboarding_completed) {
-        router.replace('/');
+        router.replace('/home');
         return;
       }
       setAccessToken(session.access_token);
@@ -42,18 +42,29 @@ export default function OnboardingQuizPage() {
     setIsSubmitting(true);
     try {
       await request();
-      router.replace('/');
     } catch (err) {
       // Already-completed just means the goal state already holds — the
       // cached-session guard above can be stale for a short window, but
       // there's nothing wrong to report to the user here.
-      if (err instanceof ApiError && err.status === 409) {
-        router.replace('/');
+      if (!(err instanceof ApiError && err.status === 409)) {
+        setError('Something went wrong. Please try again.');
+        setIsSubmitting(false);
         return;
       }
-      setError('Something went wrong. Please try again.');
-      setIsSubmitting(false);
     }
+
+    // The server best-effort-syncs app_metadata.onboarding_completed via the
+    // admin API, but that never reaches this already-issued client session —
+    // getSession() would keep returning the stale pre-onboarding JWT, and
+    // /home's auth guard would bounce straight back here. Force a refresh so
+    // the guard sees the real value before we hand off.
+    try {
+      await createClient().auth.refreshSession();
+    } catch {
+      // Best-effort — worst case /home's guard bounces back here once, same
+      // as before this fix, rather than blocking the redirect over it.
+    }
+    router.replace('/home');
   }
 
   function handleSkip() {

@@ -47,7 +47,7 @@ test.describe('login', () => {
     await page.fill('#email', completedEmail);
     await page.fill('#password', password);
     await page.getByRole('button', { name: 'Log in' }).click();
-    await page.waitForURL('/');
+    await page.waitForURL('/home');
 
     await supabaseAdmin.auth.admin.deleteUser(data.user.id);
   });

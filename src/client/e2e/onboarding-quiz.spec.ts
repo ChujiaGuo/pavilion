@@ -27,7 +27,14 @@ test('skipping the quiz sets the default score and redirects home', async ({ pag
 
   await loginAndReachQuiz(page, email, password);
   await page.getByRole('button', { name: 'Skip for now' }).click();
-  await page.waitForURL('/');
+  await page.waitForURL('/home');
+  await expect(page.getByRole('heading', { name: 'Your dashboard' })).toBeVisible();
+  // The stale-session bounce-back to /onboarding/quiz (fixed by refreshing
+  // the session before redirecting — see quiz page.tsx's finishWith) landed
+  // a beat after the initial navigation, so waitForURL alone didn't catch
+  // it. Give that window a chance to elapse before asserting we're still here.
+  await page.waitForTimeout(2000);
+  await expect(page).toHaveURL(/\/home/);
 
   const { data: profile, error } = await supabaseAdmin
     .from('profiles')
@@ -64,7 +71,14 @@ test('completing all quiz steps computes a score and redirects home', async ({ p
     await page.getByRole('button', { name: isLastStep ? 'Finish' : 'Next', exact: true }).click();
   }
 
-  await page.waitForURL('/');
+  await page.waitForURL('/home');
+  await expect(page.getByRole('heading', { name: 'Your dashboard' })).toBeVisible();
+  // The stale-session bounce-back to /onboarding/quiz (fixed by refreshing
+  // the session before redirecting — see quiz page.tsx's finishWith) landed
+  // a beat after the initial navigation, so waitForURL alone didn't catch
+  // it. Give that window a chance to elapse before asserting we're still here.
+  await page.waitForTimeout(2000);
+  await expect(page).toHaveURL(/\/home/);
 
   const { data: profile, error } = await supabaseAdmin
     .from('profiles')

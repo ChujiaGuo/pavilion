@@ -58,7 +58,31 @@ export async function getUserById(id: string, requesterId: string): Promise<User
   return toUser(data as UserRow);
 }
 
-export async function updateUser(id: string, fields: UserUpdateFields): Promise<User | null> {
+export type UpdateUserResult =
+  | { ok: true; user: User }
+  | { ok: false; reason: 'not_found' | 'name_locked' };
+
+export async function updateUser(id: string, fields: UserUpdateFields): Promise<UpdateUserResult> {
+  // Once a profile is verified, first/last name are locked — they were
+  // checked against the credentials that earned the verified_tier, so
+  // letting them change afterward (to anything, not just null) would
+  // decouple the verified badge from the identity it verified. The
+  // profiles_verified_requires_name CHECK constraint only stops clearing
+  // them to null; this is the app-layer rule that also stops changing them
+  // to a different value.
+  if (fields.firstName !== undefined || fields.lastName !== undefined) {
+    const { data: current } = await supabase
+      .from('profiles')
+      .select('verified_tier')
+      .eq('id', id)
+      .is('deleted_at', null)
+      .single();
+
+    if (current?.verified_tier != null) {
+      return { ok: false, reason: 'name_locked' };
+    }
+  }
+
   const updates: Record<string, unknown> = {};
   if (fields.displayName !== undefined) updates.display_name = fields.displayName;
   if (fields.firstName !== undefined) updates.first_name = fields.firstName;
@@ -78,8 +102,8 @@ export async function updateUser(id: string, fields: UserUpdateFields): Promise<
     .select(PROFILE_SELECT)
     .single();
 
-  if (error || !data) return null;
-  return toUser(data as UserRow);
+  if (error || !data) return { ok: false, reason: 'not_found' };
+  return { ok: true, user: toUser(data as UserRow) };
 }
 
 export async function softDeleteUser(id: string): Promise<boolean> {

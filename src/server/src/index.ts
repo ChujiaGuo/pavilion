@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
 import { noStore } from './middleware/no-store.js';
 import { venueRouter } from './domains/venue/venue.router.js';
@@ -9,6 +10,8 @@ import { ratingRouter } from './domains/rating/rating.router.js';
 import { messagingRouter } from './domains/messaging/messaging.router.js';
 
 const app = new Hono();
+
+app.use(logger());
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')

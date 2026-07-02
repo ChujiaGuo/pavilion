@@ -47,7 +47,7 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    router.push('/');
+    router.push('/home');
   }
 
   return (

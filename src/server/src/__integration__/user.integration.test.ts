@@ -15,19 +15,19 @@ describe('profiles.profiles_verified_requires_name CHECK constraint (integration
   it('allows an unverified user to leave first/last name unset', async () => {
     const user = await createTestUser();
 
-    const updated = await updateUser(user.id, { firstName: null, lastName: null });
+    const result = await updateUser(user.id, { firstName: null, lastName: null });
 
-    expect(updated).not.toBeNull();
-    expect(updated!.firstName).toBeNull();
-    expect(updated!.lastName).toBeNull();
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.user.firstName).toBeNull();
+    expect(result.ok && result.user.lastName).toBeNull();
   });
 
-  it('rejects clearing a verified user\'s name via updateUser', async () => {
+  it('rejects clearing a verified user\'s name at the app layer, before the CHECK constraint is ever reached', async () => {
     const user = await createTestUser({ firstName: 'Jane', lastName: 'Doe', verifiedTier: 8 });
 
     const result = await updateUser(user.id, { firstName: null });
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ ok: false, reason: 'name_locked' });
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -35,6 +35,30 @@ describe('profiles.profiles_verified_requires_name CHECK constraint (integration
       .eq('id', user.id)
       .single();
     expect(profile!.first_name).toBe('Jane');
+  });
+
+  it('rejects changing (not just clearing) a verified user\'s name', async () => {
+    const user = await createTestUser({ firstName: 'Jane', lastName: 'Doe', verifiedTier: 8 });
+
+    const result = await updateUser(user.id, { firstName: 'NotJane' });
+
+    expect(result).toEqual({ ok: false, reason: 'name_locked' });
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('first_name')
+      .eq('id', user.id)
+      .single();
+    expect(profile!.first_name).toBe('Jane');
+  });
+
+  it('still allows non-name field changes on a verified user', async () => {
+    const user = await createTestUser({ firstName: 'Jane', lastName: 'Doe', verifiedTier: 8 });
+
+    const result = await updateUser(user.id, { city: 'Seattle' });
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.user.city).toBe('Seattle');
   });
 
   it('rejects writing verified_tier directly on a profile with no name set', async () => {

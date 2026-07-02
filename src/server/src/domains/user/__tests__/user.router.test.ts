@@ -129,6 +129,89 @@ describe('PATCH /:id', () => {
     expect((await res.json()).displayName).toBe('Bob');
   });
 
+  it.each([
+    ['displayName', ''],
+    ['displayName', '   '],
+    ['displayName', 42],
+    ['firstName', 42],
+    ['lastName', 42],
+    ['photoUrl', 42],
+    ['city', 42],
+    ['region', 42],
+    ['preferredFormats', 'singles'],
+    ['preferredFormats', ['not-a-format']],
+    ['playStyle', 'not-a-style'],
+    ['privacyLevel', 'not-a-level'],
+  ])('returns 400 for invalid %s (%j), without reaching the DB', async (field, value) => {
+    const res = await userRouter.request(`/${USER_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it('accepts null for nullable fields (firstName, lastName, photoUrl)', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: USER_ROW, error: null });
+
+    const res = await userRouter.request(`/${USER_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ firstName: null, lastName: null, photoUrl: null }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('ignores fields outside the editable set (e.g. internalScore) rather than rejecting the request', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({
+      data: { ...USER_ROW, display_name: 'Bob' },
+      error: null,
+    });
+
+    const res = await userRouter.request(`/${USER_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Bob', internalScore: 10, verifiedTier: 10 }),
+    });
+    expect(res.status).toBe(200);
+    // updateUser() only ever reads the nine named fields — see user.service.ts —
+    // so unvalidated extra keys are structurally inert, not just unvalidated.
+    const updateArg = chain['update'].mock.calls[0][0] as Record<string, unknown>;
+    expect(updateArg).toEqual({ display_name: 'Bob' });
+  });
+
+  it('returns 403 when changing firstName/lastName on a verified profile', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: { verified_tier: 8 }, error: null });
+
+    const res = await userRouter.request(`/${USER_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ firstName: 'NewName' }),
+    });
+    expect(res.status).toBe(403);
+    expect(chain['update']).not.toHaveBeenCalled();
+  });
+
+  it('allows non-name field changes on a verified profile', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: { ...USER_ROW, verified_tier: 8 }, error: null });
+
+    const res = await userRouter.request(`/${USER_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ city: 'Seattle' }),
+    });
+    expect(res.status).toBe(200);
+  });
+
   it('returns 404 when the user does not exist', async () => {
     const chain = makeChain();
     mockFrom.mockReturnValue(chain as any);

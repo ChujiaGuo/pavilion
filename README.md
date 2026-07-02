@@ -53,6 +53,8 @@ Client runs on `http://localhost:3000`, server on `http://localhost:4000`, Supab
 
 `src/server/.env.local`'s `ALLOWED_ORIGINS` (comma-separated, no wildcard support) gates which origins the API's CORS policy accepts — it defaults to `http://localhost:3000`. If you're testing from another device on your network (e.g. a phone hitting the dev server by LAN IP), add that origin too, e.g. `ALLOWED_ORIGINS=http://localhost:3000,http://192.168.1.45:3000`.
 
+That LAN origin only covers requests *to* the API. The client's own `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_API_URL` (`src/client/.env.local`) are baked into the browser bundle, so a phone loading the page via LAN IP still tries to reach whatever host those vars name — left as `localhost`/`127.0.0.1`, that resolves to the phone itself and every auth/API call fails immediately with a network error (`TypeError: Load Failed` on Safari). Point both at the same LAN IP instead (Supabase's local Kong gateway publishes on `0.0.0.0:54321`, so it's reachable): `NEXT_PUBLIC_SUPABASE_URL=http://192.168.1.45:54321`, `NEXT_PUBLIC_API_URL=http://192.168.1.45:4000`. Restart the client dev server after changing these — Next.js inlines `NEXT_PUBLIC_*` vars at startup, not per-request.
+
 ## Enabling Google sign-in (optional)
 
 Email/password auth works out of the box. Google is scaffolded in code (see `technical-notes.md` "Auth") but disabled by default since it needs real OAuth credentials:

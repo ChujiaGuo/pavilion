@@ -40,7 +40,7 @@ function LoginForm() {
     }
 
     if (data.user.app_metadata?.onboarding_completed) {
-      router.replace('/');
+      router.replace('/home');
     } else {
       router.replace('/onboarding/quiz');
     }

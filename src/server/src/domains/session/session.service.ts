@@ -168,7 +168,7 @@ export async function getSessionById(id: string): Promise<Session | null> {
 export async function listSessions(filters: SessionListFilters = {}): Promise<Session[]> {
   const status = filters.status ?? 'upcoming';
 
-  // attendeeId: enforce privacy then resolve session IDs from active RSVPs
+  // attendeeId: enforce privacy then resolve session IDs from RSVPs the user was actually part of
   let attendeeSessionIds: string[] | null = null;
   if (filters.attendeeId) {
     const { data: targetProfile } = await supabase
@@ -184,11 +184,18 @@ export async function listSessions(filters: SessionListFilters = {}): Promise<Se
       return [];
     }
 
+    // 'attended' is included alongside the active statuses so a session
+    // survives in this filter after the organizer marks attendance
+    // (POST /:id/attendance flips 'going' -> 'attended') — otherwise a
+    // completed session the attendee actually attended would silently drop
+    // out of their own history. 'no_show'/'cancelled' are deliberately
+    // excluded: this filter answers "sessions this user was part of", not
+    // "sessions this user RSVPed to at some point".
     const { data: rsvpData } = await supabase
       .from('session_rsvps')
       .select('session_id')
       .eq('user_id', filters.attendeeId)
-      .in('status', ['going', 'waitlisted']);
+      .in('status', ['going', 'waitlisted', 'attended']);
     attendeeSessionIds = (rsvpData ?? []).map((r: { session_id: string }) => r.session_id);
     if (attendeeSessionIds.length === 0) return [];
   }

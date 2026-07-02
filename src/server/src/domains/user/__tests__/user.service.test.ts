@@ -106,8 +106,9 @@ describe('updateUser', () => {
       error: null,
     });
 
-    const user = await updateUser('user-1', { displayName: 'Bob' });
-    expect(user?.displayName).toBe('Bob');
+    const result = await updateUser('user-1', { displayName: 'Bob' });
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.user.displayName).toBe('Bob');
   });
 
   it('maps camelCase input fields to snake_case DB columns', async () => {
@@ -145,12 +146,64 @@ describe('updateUser', () => {
     expect(Object.keys(updateArg)).toEqual(['display_name']);
   });
 
-  it('returns null when DB returns an error', async () => {
+  it('returns not_found when DB returns an error', async () => {
     const chain = makeChain();
     mockFrom.mockReturnValue(chain as any);
     chain['single'].mockResolvedValue({ data: null, error: new Error('not found') });
 
-    expect(await updateUser('user-1', { displayName: 'Bob' })).toBeNull();
+    const result = await updateUser('user-1', { displayName: 'Bob' });
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('does not pre-check verified_tier when firstName/lastName are absent from the patch', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: BASE_ROW, error: null });
+
+    await updateUser('user-1', { displayName: 'Bob' });
+
+    // Only the main update's own select/eq/is/single chain — no separate
+    // verified_tier lookup — so `select` is called exactly once (for the
+    // update's own `.select(PROFILE_SELECT)`).
+    expect(chain['select']).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects changing firstName when the profile is verified', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: { verified_tier: 8 }, error: null });
+
+    const result = await updateUser('user-1', { firstName: 'NewName' });
+    expect(result).toEqual({ ok: false, reason: 'name_locked' });
+    expect(chain['update']).not.toHaveBeenCalled();
+  });
+
+  it('rejects clearing lastName to null when the profile is verified', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: { verified_tier: 8 }, error: null });
+
+    const result = await updateUser('user-1', { lastName: null });
+    expect(result).toEqual({ ok: false, reason: 'name_locked' });
+    expect(chain['update']).not.toHaveBeenCalled();
+  });
+
+  it('allows firstName/lastName changes when the profile is not verified', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: { ...BASE_ROW, verified_tier: null }, error: null });
+
+    const result = await updateUser('user-1', { firstName: 'NewName' });
+    expect(result.ok).toBe(true);
+  });
+
+  it('allows non-name field changes on a verified profile', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: { ...BASE_ROW, verified_tier: 8 }, error: null });
+
+    const result = await updateUser('user-1', { city: 'Seattle' });
+    expect(result.ok).toBe(true);
   });
 });
 

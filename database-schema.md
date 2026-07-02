@@ -20,7 +20,7 @@ See `technical-notes.md` for lookup logic, derivation formulas, and access contr
 | `last_name` | text | nullable. Same requirement as `first_name` |
 | `photo_url` | text | nullable |
 | `city` | text | |
-| `region` | text | |
+| `region` | text | Labeled "State" in the profile edit UI (`src/client/src/app/profile/page.tsx`) — column name unchanged since `region` stays the more general term product-wise (see brainstorm.md's deferred "Regional rating calibration"), it's just presented as "State" for the current US-first launch |
 | `preferred_formats` | text[] | `'singles'`, `'doubles'`, `'mixed'` |
 | `play_style` | text | `'competitive'`, `'social'`, `'training'` |
 | `privacy_level` | text | `'private'`, `'public'` — default `'private'` |

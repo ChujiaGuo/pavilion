@@ -1,10 +1,15 @@
 import { Hono } from 'hono';
 import { auth } from '../../middleware/auth.js';
 import { getUserById, updateUser, softDeleteUser } from './user.service.js';
+import type { PlayFormat, PlayStyle, PrivacyLevel } from '@pavilion/types';
 
 export const userRouter = new Hono<{ Variables: { userId: string } }>();
 
 userRouter.use(auth);
+
+const VALID_PLAY_FORMATS: PlayFormat[] = ['singles', 'doubles', 'mixed'];
+const VALID_PLAY_STYLES: PlayStyle[] = ['competitive', 'social', 'training'];
+const VALID_PRIVACY_LEVELS: PrivacyLevel[] = ['private', 'public'];
 
 userRouter.get('/:id', async (c) => {
   const user = await getUserById(c.req.param('id'), c.get('userId'));
@@ -18,9 +23,56 @@ userRouter.patch('/:id', async (c) => {
   }
 
   const body = await c.req.json();
-  const user = await updateUser(c.get('userId'), body);
-  if (!user) return c.json({ error: 'Not found' }, 404);
-  return c.json(user);
+  const {
+    displayName, firstName, lastName, photoUrl, city, region,
+    preferredFormats, playStyle, privacyLevel,
+  } = body as Record<string, unknown>;
+
+  // Every field updateUser() reads is validated here — it's the only thing
+  // standing between an arbitrary request body and a raw DB write, since
+  // updateUser() itself has no validation (it trusts fields it's handed,
+  // see user.service.ts). Fields it doesn't read (e.g. internalScore,
+  // verifiedTier) don't need validation — they're already unreachable
+  // regardless of what's in the body.
+  if (displayName !== undefined && (typeof displayName !== 'string' || displayName.trim() === '')) {
+    return c.json({ error: 'displayName must be a non-empty string' }, 400);
+  }
+  if (firstName !== undefined && firstName !== null && typeof firstName !== 'string') {
+    return c.json({ error: 'firstName must be a string or null' }, 400);
+  }
+  if (lastName !== undefined && lastName !== null && typeof lastName !== 'string') {
+    return c.json({ error: 'lastName must be a string or null' }, 400);
+  }
+  if (photoUrl !== undefined && photoUrl !== null && typeof photoUrl !== 'string') {
+    return c.json({ error: 'photoUrl must be a string or null' }, 400);
+  }
+  if (city !== undefined && typeof city !== 'string') {
+    return c.json({ error: 'city must be a string' }, 400);
+  }
+  if (region !== undefined && typeof region !== 'string') {
+    return c.json({ error: 'region must be a string' }, 400);
+  }
+  if (preferredFormats !== undefined) {
+    const isValid =
+      Array.isArray(preferredFormats) &&
+      preferredFormats.every((f) => VALID_PLAY_FORMATS.includes(f as PlayFormat));
+    if (!isValid) return c.json({ error: 'Invalid preferredFormats' }, 400);
+  }
+  if (playStyle !== undefined && !VALID_PLAY_STYLES.includes(playStyle as PlayStyle)) {
+    return c.json({ error: 'Invalid playStyle' }, 400);
+  }
+  if (privacyLevel !== undefined && !VALID_PRIVACY_LEVELS.includes(privacyLevel as PrivacyLevel)) {
+    return c.json({ error: 'Invalid privacyLevel' }, 400);
+  }
+
+  const result = await updateUser(c.get('userId'), body);
+  if (!result.ok) {
+    if (result.reason === 'name_locked') {
+      return c.json({ error: 'Name is locked after verification and cannot be changed' }, 403);
+    }
+    return c.json({ error: 'Not found' }, 404);
+  }
+  return c.json(result.user);
 });
 
 userRouter.delete('/:id', async (c) => {

@@ -1,0 +1,17 @@
+'use client';
+
+import { useRequireAuth } from '@/lib/hooks/use-require-auth';
+import { AppShell } from '@/components/nav/app-shell';
+
+export default function PlayersPage() {
+  const auth = useRequireAuth();
+  if (!auth) return null;
+
+  return (
+    <AppShell>
+      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">Players</p>
+      <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Find players</h1>
+      <p className="mt-6 text-neutral-600">Player search is coming soon.</p>
+    </AppShell>
+  );
+}
