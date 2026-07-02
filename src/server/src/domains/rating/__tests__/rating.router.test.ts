@@ -43,6 +43,7 @@ const RATING_DISPLAY = {
   subtier: 2 as const,
   label: 'Grade 4 — II',
   isProvisional: false,
+  atUnverifiedCeiling: false,
 };
 
 function withAuth(asUserId = USER_ID): Record<string, string> {

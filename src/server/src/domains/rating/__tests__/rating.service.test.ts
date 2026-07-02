@@ -369,6 +369,26 @@ describe('toRatingDisplay', () => {
     expect(toRatingDisplay(4.0, 2).isProvisional).toBe(true);
     expect(toRatingDisplay(4.0, 0).isProvisional).toBe(false);
   });
+
+  it('flags an unverified player pinned at the 7.99 ceiling', () => {
+    expect(toRatingDisplay(7.99, 0, null).atUnverifiedCeiling).toBe(true);
+  });
+
+  it('flags an unverified player as soon as they reach the ceiling grade\'s last subtier', () => {
+    expect(toRatingDisplay(7.75, 0, null).atUnverifiedCeiling).toBe(true);
+  });
+
+  it('does not flag an unverified player below the ceiling grade\'s last subtier', () => {
+    expect(toRatingDisplay(7.7, 0, null).atUnverifiedCeiling).toBe(false);
+  });
+
+  it('does not flag a verified player even at the same score', () => {
+    expect(toRatingDisplay(7.99, 0, 1).atUnverifiedCeiling).toBe(false);
+  });
+
+  it('defaults verifiedTier to null when omitted', () => {
+    expect(toRatingDisplay(7.99, 0).atUnverifiedCeiling).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

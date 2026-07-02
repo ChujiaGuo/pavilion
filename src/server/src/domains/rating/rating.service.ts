@@ -60,14 +60,14 @@ function toRatingHistory(row: RatingHistoryRow): RatingHistory {
 export async function getUserRatingDisplay(userId: string, requesterId: string): Promise<RatingDisplay | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('internal_score, placement_sessions_remaining, privacy_level')
+    .select('internal_score, placement_sessions_remaining, privacy_level, verified_tier')
     .eq('id', userId)
     .is('deleted_at', null)
     .single();
 
   if (error || !data) return null;
   if (data.privacy_level === 'private' && userId !== requesterId) return null;
-  return toRatingDisplay(data.internal_score, data.placement_sessions_remaining);
+  return toRatingDisplay(data.internal_score, data.placement_sessions_remaining, data.verified_tier);
 }
 
 export async function getRatingHistory(userId: string): Promise<RatingHistory[]> {

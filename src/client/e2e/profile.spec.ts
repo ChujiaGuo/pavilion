@@ -39,7 +39,7 @@ test.describe('profile page', () => {
 
     await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible();
     await expect(page.getByText(email.split('@')[0])).toBeVisible();
-    await expect(page.getByText('Grade 3 — I')).toBeVisible();
+    await expect(page.getByText('Grade 3')).toBeVisible();
     await expect(page.getByText('Provisional')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
   });

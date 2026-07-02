@@ -278,7 +278,11 @@ export function computeOnboardingScore(answers: OnboardingAnswers): number | nul
   return Math.round(clamped * 100) / 100;
 }
 
-export function toRatingDisplay(internalScore: number, placementSessionsRemaining: number): RatingDisplay {
+export function toRatingDisplay(
+  internalScore: number,
+  placementSessionsRemaining: number,
+  verifiedTier: number | null = null,
+): RatingDisplay {
   const grade = Math.floor(internalScore);
   const subtierIndex = clamp(Math.floor((internalScore % 1) / 0.25), 0, 3);
   const subtier = (subtierIndex + 1) as 1 | 2 | 3 | 4;
@@ -288,5 +292,10 @@ export function toRatingDisplay(internalScore: number, placementSessionsRemainin
     subtier,
     label: `Grade ${grade} — ${SUBTIER_ROMAN[subtierIndex]}`,
     isProvisional: placementSessionsRemaining > 0,
+    // Flags as soon as the last subtier of the unverified ceiling's grade is
+    // reached (e.g. Grade 7 — IV), not just once the score is clamped exactly
+    // at UNVERIFIED_CEILING — a player sitting at 7.8 is just as stuck as one
+    // pinned at 7.99, since peer ratings alone can't move them into grade 8.
+    atUnverifiedCeiling: verifiedTier === null && grade === Math.floor(UNVERIFIED_CEILING) && subtier === 4,
   };
 }

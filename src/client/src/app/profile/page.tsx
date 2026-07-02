@@ -19,8 +19,9 @@ import {
   ComboboxItem,
   ComboboxEmpty,
 } from '@/components/ui/combobox';
-import { BadgeCheck, LogOut } from 'lucide-react';
+import { BadgeCheck, LogOut, Star } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { cn } from '@/lib/utils';
 import { US_STATES, type UsState } from '@/lib/us-states';
 import type { PlayFormat, PlayStyle, PrivacyLevel, RatingDisplay, User } from '@pavilion/types';
 
@@ -354,14 +355,44 @@ export default function ProfilePage() {
               <p className="text-sm font-semibold uppercase tracking-[0.15em] text-neutral-500">
                 Rating
               </p>
-              <p className="mt-1 text-neutral-900">
-                {rating.label}
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 leading-none text-neutral-900">
+                <span className="translate-y-px whitespace-nowrap">Grade {rating.grade}</span>
+                <span className="text-neutral-300" aria-hidden>
+                  |
+                </span>
+                <span
+                  className="flex shrink-0 items-center gap-0.5"
+                  aria-label={`${rating.subtier} out of 4 stars`}
+                >
+                  {[1, 2, 3, 4].map((star) => (
+                    <Star
+                      key={star}
+                      className={cn(
+                        'size-4',
+                        star <= rating.subtier
+                          ? 'fill-primary text-primary'
+                          : 'fill-none text-neutral-300'
+                      )}
+                      aria-hidden
+                    />
+                  ))}
+                </span>
                 {rating.isProvisional && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-sm font-medium text-primary">
+                  <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
                     Provisional
                     <InfoTooltip>
                       Your rating is based on your onboarding quiz answers and adjusts more per
                       session until you&apos;ve completed a few rated sessions with other players.
+                    </InfoTooltip>
+                  </span>
+                )}
+                {rating.atUnverifiedCeiling && (
+                  <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
+                    Verification required to advance
+                    <InfoTooltip>
+                      Peer ratings alone cap out at Grade 7. To be promoted further, submit
+                      verification — tournament results, a national ranking, or a club/coach
+                      endorsement.
                     </InfoTooltip>
                   </span>
                 )}

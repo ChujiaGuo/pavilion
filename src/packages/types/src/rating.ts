@@ -3,6 +3,7 @@ export interface RatingDisplay {
   subtier: 1 | 2 | 3 | 4;
   label: string;
   isProvisional: boolean;
+  atUnverifiedCeiling: boolean;
 }
 
 export type RelativeVote =
