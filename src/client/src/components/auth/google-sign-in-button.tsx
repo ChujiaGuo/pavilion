@@ -58,9 +58,7 @@ export function GoogleSignInButton({
       className="h-10 w-full gap-3 border-[#747775] bg-white px-4 text-[#1f1f1f] hover:bg-[#f7f8f8] hover:text-[#1f1f1f]"
     >
       <GoogleLogo />
-      <span className="text-sm font-medium" style={{ fontFamily: "'Google Sans', Roboto, Arial, sans-serif" }}>
-        {text}
-      </span>
+      <span className="font-google-sans text-sm font-medium">{text}</span>
     </Button>
   );
 }

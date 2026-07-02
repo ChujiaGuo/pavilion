@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
-import { auth } from '../../middleware/auth.js';
-import { supabase } from '../../lib/supabase.js';
+import { auth, getOptionalUserId } from '../../middleware/auth.js';
 import type { SessionStatus, SessionType, SessionFormat, SessionVisibility, ShuttlePolicy } from '@pavilion/types';
 import {
   getSessionById,
@@ -87,11 +86,8 @@ sessionRouter.get('/', async (c) => {
   // attendee_id — respects private-profile visibility
   // organizer_id — gates invite_only sessions to the organizer themselves
   if (attendee_id !== undefined || organizer_id !== undefined) {
-    const token = c.req.header('Authorization')?.replace('Bearer ', '');
-    if (token) {
-      const { data: { user } } = await supabase.auth.getUser(token);
-      if (user) filters.requestingUserId = user.id;
-    }
+    const requestingUserId = await getOptionalUserId(c);
+    if (requestingUserId) filters.requestingUserId = requestingUserId;
   }
 
   const sessions = await listSessions(filters);
@@ -182,11 +178,8 @@ sessionRouter.get('/:id', async (c) => {
   if (!session) return c.json({ error: 'Not found' }, 404);
 
   if (session.visibility === 'invite_only') {
-    const token = c.req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) return c.json({ error: 'Forbidden' }, 403);
-
-    const { data: { user } } = await supabase.auth.getUser(token);
-    if (!user) return c.json({ error: 'Forbidden' }, 403);
+    const requestingUserId = await getOptionalUserId(c);
+    if (!requestingUserId) return c.json({ error: 'Forbidden' }, 403);
   }
 
   return c.json(session);
@@ -254,11 +247,8 @@ sessionRouter.get('/:id/rsvps', async (c) => {
   if (!session) return c.json({ error: 'Not found' }, 404);
 
   if (session.visibility === 'invite_only') {
-    const token = c.req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) return c.json({ error: 'Forbidden' }, 403);
-
-    const { data: { user } } = await supabase.auth.getUser(token);
-    if (!user) return c.json({ error: 'Forbidden' }, 403);
+    const requestingUserId = await getOptionalUserId(c);
+    if (!requestingUserId) return c.json({ error: 'Forbidden' }, 403);
   }
 
   const rsvps = await getSessionRsvps(c.req.param('id'));

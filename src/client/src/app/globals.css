@@ -127,3 +127,13 @@
     @apply font-sans;
   }
 }
+
+/* Google Identity branding guidelines require this exact font stack on the
+   Google sign-in button — see google-sign-in-button.tsx. */
+.font-google-sans {
+  font-family:
+    'Google Sans',
+    Roboto,
+    Arial,
+    sans-serif;
+}

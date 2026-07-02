@@ -196,7 +196,10 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# Tuned up from the CLI's stock default of 2 — that was tight enough to block a legitimate
+# user re-requesting a password-reset email after losing/missing the first one. See
+# technical-notes.md "Auth" for the full brute-force-hardening rationale.
+email_sent = 3
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -204,9 +207,15 @@ anonymous_users = 30
 # Number of sessions that can be refreshed in a 5 minute interval per IP address.
 token_refresh = 150
 # Number of sign up and sign-in requests that can be made in a 5 minute interval per IP address (excludes anonymous users).
-sign_in_sign_ups = 30
+# Tuned down from the CLI's stock default of 30 — per-IP brute-force/credential-stuffing
+# protection on login+signup. Moderate setting: meaningfully slows a single-IP attacker
+# without much risk of throttling a shared office/NAT IP under normal use. See
+# technical-notes.md "Auth".
+sign_in_sign_ups = 10
 # Number of OTP / Magic link verifications that can be made in a 5 minute interval per IP address.
-token_verifications = 30
+# Tuned down from the CLI's stock default of 30 — same brute-force rationale as
+# sign_in_sign_ups above; this is the step a password-reset link's token exchange goes through.
+token_verifications = 15
 # Number of Web3 logins that can be made in a 5 minute interval per IP address.
 web3 = 30
 
@@ -334,8 +343,10 @@ skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
 email_optional = false
 
-# Google sign-in. `enabled = false` until real credentials exist (see README.md "Local setup") —
-# the client_id/secret below are read from env vars so nothing secret is committed to git.
+# Google sign-in. Committed default is `enabled = false` until real credentials exist
+# (see README.md "Enabling Google sign-in"). `true` below is a local-only dev toggle for
+# testing against personal OAuth credentials — flip back to `false` before committing;
+# the client_id/secret are read from env vars so nothing secret is committed to git.
 [auth.external.google]
 enabled = false
 client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
@@ -378,6 +389,19 @@ enabled = false
 authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
+
+# Per-project config overrides for `supabase config push` — see README.md "Production setup"
+# and technical-notes.md "Auth". `config push` pushes this whole file's [auth] section to the
+# linked project, including `site_url`/`additional_redirect_urls` above (local-dev values,
+# `127.0.0.1`/`localhost`) — without an override here it would silently overwrite prod's Site
+# URL/Redirect URLs on every push (documented CLI gotcha: supabase/cli#3208, #3365). Uncomment
+# and fill in once a prod project exists, mirroring whatever's set in the Supabase dashboard
+# (Authentication → URL Configuration) so the two stay in sync.
+# [remotes.production]
+# project_id = "<prod-project-ref>"
+# [remotes.production.auth]
+# site_url = "https://<prod-domain>"
+# additional_redirect_urls = ["https://<prod-domain>/**"]
 
 [edge_runtime]
 enabled = true

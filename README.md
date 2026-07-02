@@ -51,6 +51,8 @@ cd src && npm run dev
 
 Client runs on `http://localhost:3000`, server on `http://localhost:4000`, Supabase Studio on `http://localhost:54323`. Local Supabase doesn't send real email — auth emails (e.g. the `/forgot-password` reset link) land in the local inbox UI at `http://localhost:54324` instead.
 
+`src/server/.env.local`'s `ALLOWED_ORIGINS` (comma-separated, no wildcard support) gates which origins the API's CORS policy accepts — it defaults to `http://localhost:3000`. If you're testing from another device on your network (e.g. a phone hitting the dev server by LAN IP), add that origin too, e.g. `ALLOWED_ORIGINS=http://localhost:3000,http://192.168.1.45:3000`.
+
 ## Enabling Google sign-in (optional)
 
 Email/password auth works out of the box. Google is scaffolded in code (see `technical-notes.md` "Auth") but disabled by default since it needs real OAuth credentials:
@@ -88,9 +90,11 @@ The integration suite runs the actual service code against a local Postgres inst
 1. Create a Supabase cloud project at supabase.com
 2. `supabase link --project-ref <your-project-ref>`
 3. `supabase db push` — applies all migrations to prod for the first time
-4. Add prod env vars to the Railway/Render dashboard (see `.env.example` files for the full list)
+4. Add prod env vars to the Railway/Render dashboard (see `.env.example` files for the full list). For the server's `ALLOWED_ORIGINS`, use the prod frontend's actual domain(s) (e.g. `https://<prod-domain>`) — not `localhost`. Update this value any time a prod/staging frontend domain is added or removed; no code change or redeploy of the API's source is needed, just the env var.
 5. Connect the repo to Railway/Render — it auto-deploys on push to `main`
 6. In the Supabase dashboard (Authentication → URL Configuration), set **Site URL** to the prod domain and add `https://<prod-domain>/**` to **Redirect URLs** — needed for the Google OAuth callback and the `/forgot-password` reset-link flow to land on the right page instead of silently falling back to Site URL with an unusable `?code=`. `supabase/config.toml`'s `additional_redirect_urls` only governs local dev; this dashboard setting is prod's equivalent and must use the same `/**` wildcard suffix (see `technical-notes.md` "Auth" for why the wildcard specifically matters).
+7. Uncomment and fill in the `[remotes.production]` block near the end of `supabase/config.toml` with the project ref from step 2 and the same Site URL/Redirect URLs you set in step 6 — this is a safety pin, not a duplicate config path; see the inline comment above that block for why it's required before the next step.
+8. `supabase config push` — pushes `config.toml`'s `[auth]` section (including the tuned `[auth.rate_limit]` values, and `[auth.captcha]` if that's ever enabled) to the linked prod project. Safe to re-run any time `config.toml`'s auth settings change, as long as the `[remotes.production]` block from step 7 stays in sync with step 6's dashboard values — if you ever change Site URL/Redirect URLs in the dashboard, update `[remotes.production]` to match before pushing again, or `config push` will overwrite the dashboard values with whatever's in `config.toml`.
 
 Prod env vars never go in files — hosting dashboard only.
 
