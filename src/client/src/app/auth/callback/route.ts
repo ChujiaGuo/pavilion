@@ -14,5 +14,12 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(`${origin}/login?error=oauth_failed`);
+  // This route also brokers password-recovery links (resetPasswordForEmail's
+  // redirectTo), so an expired/invalid code should fall back to a page that
+  // makes sense for that flow rather than always blaming Google sign-in.
+  const failureRedirect = next.startsWith('/reset-password')
+    ? '/forgot-password?error=reset_link_invalid'
+    : '/login?error=oauth_failed';
+
+  return NextResponse.redirect(`${origin}${failureRedirect}`);
 }

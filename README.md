@@ -49,7 +49,7 @@ cp src/server/.env.example src/server/.env.local
 cd src && npm run dev
 ```
 
-Client runs on `http://localhost:3000`, server on `http://localhost:4000`, Supabase Studio on `http://localhost:54323`.
+Client runs on `http://localhost:3000`, server on `http://localhost:4000`, Supabase Studio on `http://localhost:54323`. Local Supabase doesn't send real email — auth emails (e.g. the `/forgot-password` reset link) land in the local inbox UI at `http://localhost:54324` instead.
 
 ## Enabling Google sign-in (optional)
 
@@ -88,6 +88,7 @@ The integration suite runs the actual service code against a local Postgres inst
 3. `supabase db push` — applies all migrations to prod for the first time
 4. Add prod env vars to the Railway/Render dashboard (see `.env.example` files for the full list)
 5. Connect the repo to Railway/Render — it auto-deploys on push to `main`
+6. In the Supabase dashboard (Authentication → URL Configuration), set **Site URL** to the prod domain and add `https://<prod-domain>/**` to **Redirect URLs** — needed for the Google OAuth callback and the `/forgot-password` reset-link flow to land on the right page instead of silently falling back to Site URL with an unusable `?code=`. `supabase/config.toml`'s `additional_redirect_urls` only governs local dev; this dashboard setting is prod's equivalent and must use the same `/**` wildcard suffix (see `technical-notes.md` "Auth" for why the wildcard specifically matters).
 
 Prod env vars never go in files — hosting dashboard only.
 
