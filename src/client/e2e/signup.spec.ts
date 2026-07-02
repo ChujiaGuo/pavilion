@@ -23,7 +23,7 @@ test('creates an account, sets display name/first name/last name/city, and redir
   expect(res.status()).toBe(200);
   const userId: string = (await res.json()).user.id;
 
-  await page.waitForURL('/');
+  await page.waitForURL('/onboarding/quiz');
 
   const { data: profile, error } = await supabaseAdmin
     .from('profiles')
@@ -57,7 +57,7 @@ test('creates an account when first/last name are left blank', async ({ page }) 
   expect(res.status()).toBe(200);
   const userId: string = (await res.json()).user.id;
 
-  await page.waitForURL('/');
+  await page.waitForURL('/onboarding/quiz');
 
   const { data: profile, error } = await supabaseAdmin
     .from('profiles')

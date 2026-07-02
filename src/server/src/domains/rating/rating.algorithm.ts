@@ -199,6 +199,85 @@ export function computeRatingUpdate(input: ComputeRatingUpdateInput): ComputeRat
   };
 }
 
+// ---------------------------------------------------------------------------
+// Onboarding placement quiz — self-reported answers produce a provisional
+// initial score. Same idea as the peer-vote scoring above (pure, no I/O,
+// unit-testable), but a straight average rather than a learning-rate walk
+// since there's no prior score to move relative to.
+//
+// Calibration is approximate, same caveat as the "Distribution calibration"
+// note in technical-notes.md — revisit via the (already deferred) global
+// recalibration job if drift shows up, not by hand-tuning this table later.
+// ---------------------------------------------------------------------------
+
+export const AVERAGE_RATING_ANCHOR = 3.5;
+export const SKIP_DEFAULT_SCORE = 2.75; // one grade below the anchor
+
+export type OnboardingQuestionId =
+  | 'highest_level_played'
+  | 'strongest_opponents'
+  | 'competitive_history'
+  | 'play_frequency';
+
+export type OnboardingAnswers = Record<OnboardingQuestionId, string>;
+
+const ONBOARDING_QUESTION_IDS: OnboardingQuestionId[] = [
+  'highest_level_played',
+  'strongest_opponents',
+  'competitive_history',
+  'play_frequency',
+];
+
+const ONBOARDING_OPTION_SCORES: Record<OnboardingQuestionId, Record<string, number>> = {
+  highest_level_played: {
+    never_played: 1.0,
+    casual_pickup: 2.25,
+    club_league: 3.75,
+    regional_tournament: 5.5,
+    national_or_above: 7.0,
+  },
+  strongest_opponents: {
+    beginners: 1.0,
+    recreational_players: 2.25,
+    competitive_club: 3.75,
+    regional_tournament_players: 5.5,
+    national_or_pro: 7.0,
+  },
+  competitive_history: {
+    none: 1.5,
+    local_casual: 2.75,
+    regional_sanctioned: 4.5,
+    national: 6.5,
+  },
+  play_frequency: {
+    rarely: 1.5,
+    monthly: 2.5,
+    weekly: 3.25,
+    multiple_weekly: 4.0,
+  },
+};
+
+/**
+ * Averages the 4 self-reported answers into a provisional initial score.
+ * Returns null if any required question is missing or its answer isn't a
+ * recognized option id — since this is an average, a missing/garbage key
+ * would silently skew the result rather than erroring like a straight sum.
+ */
+export function computeOnboardingScore(answers: OnboardingAnswers): number | null {
+  const values: number[] = [];
+  for (const questionId of ONBOARDING_QUESTION_IDS) {
+    const answer = answers[questionId];
+    if (typeof answer !== 'string') return null;
+    const score = ONBOARDING_OPTION_SCORES[questionId][answer];
+    if (score === undefined) return null;
+    values.push(score);
+  }
+
+  const average = values.reduce((sum, v) => sum + v, 0) / values.length;
+  const clamped = clamp(average, MIN_SCORE, UNVERIFIED_CEILING);
+  return Math.round(clamped * 100) / 100;
+}
+
 export function toRatingDisplay(internalScore: number, placementSessionsRemaining: number): RatingDisplay {
   const grade = Math.floor(internalScore);
   const subtierIndex = clamp(Math.floor((internalScore % 1) / 0.25), 0, 3);

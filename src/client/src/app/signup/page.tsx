@@ -59,7 +59,7 @@ export default function SignupPage() {
       }
     }
 
-    router.push('/');
+    router.replace('/onboarding/quiz');
   }
 
   return (

@@ -1,6 +1,15 @@
 import { Hono } from 'hono';
 import { auth } from '../../middleware/auth.js';
-import { getUserRatingDisplay, getRatingHistory, submitRating, type SubmitRatingResult } from './rating.service.js';
+import {
+  getUserRatingDisplay,
+  getRatingHistory,
+  submitRating,
+  submitOnboardingQuiz,
+  skipOnboarding,
+  type SubmitRatingResult,
+  type OnboardingResult,
+} from './rating.service.js';
+import type { OnboardingAnswers } from './rating.algorithm.js';
 import type { RelativeVote } from '@pavilion/types';
 
 export const ratingRouter = new Hono<{ Variables: { userId: string } }>();
@@ -43,4 +52,32 @@ ratingRouter.get('/user/:userId/history', auth, async (c) => {
   }
   const history = await getRatingHistory(userId);
   return c.json({ history });
+});
+
+const ONBOARDING_REASON_STATUS: Record<Extract<OnboardingResult, { ok: false }>['reason'], 400 | 409> = {
+  invalid_answers: 400,
+  already_completed: 409,
+};
+
+ratingRouter.post('/onboarding/submit', auth, async (c) => {
+  const body = await c.req.json();
+  const { answers } = body as { answers?: OnboardingAnswers };
+
+  if (!answers) {
+    return c.json({ error: 'answers is required' }, 400);
+  }
+
+  const result = await submitOnboardingQuiz(c.get('userId'), answers);
+  if (!result.ok) {
+    return c.json({ error: result.reason }, ONBOARDING_REASON_STATUS[result.reason]);
+  }
+  return c.json({ rating: result.rating }, 201);
+});
+
+ratingRouter.post('/onboarding/skip', auth, async (c) => {
+  const result = await skipOnboarding(c.get('userId'));
+  if (!result.ok) {
+    return c.json({ error: result.reason }, ONBOARDING_REASON_STATUS[result.reason]);
+  }
+  return c.json({ rating: result.rating }, 201);
 });

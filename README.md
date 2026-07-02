@@ -60,6 +60,8 @@ Email/password auth works out of the box. Google is scaffolded in code (see `tec
 3. Flip `enabled = true` under `[auth.external.google]` in `supabase/config.toml`, then `supabase stop && supabase start` to pick it up.
 4. For prod, add the same client ID/secret in the Supabase dashboard (Authentication → Providers → Google) with a redirect URI pointing at the prod project, instead of using `config.toml`.
 
+**⚠️ `supabase/config.toml` is committed to git — step 3 is not a personal setting.** Flipping `enabled = true` and committing it turns Google sign-in on for every teammate and CI run, not just your machine. If they don't also have the two env vars from step 2 available wherever they run `supabase start`, their local stack breaks on a setting they never asked to enable. Don't commit `enabled = true` until the credentials are distributed somewhere every developer/CI can reach (a shared secrets manager, CI secret store, etc.) — if you're only testing locally, flip it back to `false` before committing.
+
 ## Database migrations
 
 ```bash

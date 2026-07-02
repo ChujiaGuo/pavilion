@@ -139,7 +139,7 @@ export default function Home() {
               aria-hidden
               className="text-[clamp(3.5rem,14vw,9rem)] font-black leading-none text-primary/10"
             >
-              10
+              10.0
             </span>
             <div className="max-w-xl">
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">

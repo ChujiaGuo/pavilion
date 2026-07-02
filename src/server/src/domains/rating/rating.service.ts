@@ -3,8 +3,11 @@ import type { RatingDisplay, RatingHistory, RelativeVote } from '@pavilion/types
 import {
   computeRatingUpdate,
   toRatingDisplay,
+  computeOnboardingScore,
+  SKIP_DEFAULT_SCORE,
   ANOMALY_CALIBRATION_THRESHOLD,
   type TierProtectionAction,
+  type OnboardingAnswers,
 } from './rating.algorithm.js';
 
 export {
@@ -288,4 +291,70 @@ export async function submitRating(
   });
 
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding placement quiz
+// ---------------------------------------------------------------------------
+
+export type OnboardingResult =
+  | { ok: true; rating: RatingDisplay }
+  | { ok: false; reason: 'invalid_answers' | 'already_completed' };
+
+/**
+ * Shared write path for both the quiz submission and the skip action: an
+ * atomic claim-style UPDATE (same pattern as `claimVenue` in venue.service.ts)
+ * so a 0-row result means onboarding was already completed, including races
+ * against a concurrent submit/skip from another tab. The audit insert and the
+ * app_metadata mirror (see technical-notes.md "Onboarding placement quiz" for
+ * why the mirror exists) are best-effort once the profile row has committed —
+ * `profiles.onboarding_completed_at` is the only source of truth.
+ */
+async function completeOnboarding(
+  userId: string,
+  score: number,
+  audit: { answers: OnboardingAnswers | null; skipped: boolean },
+): Promise<OnboardingResult> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ internal_score: score, onboarding_completed_at: new Date().toISOString() })
+    .eq('id', userId)
+    .is('onboarding_completed_at', null)
+    .is('deleted_at', null)
+    .select('placement_sessions_remaining')
+    .single();
+
+  if (error || !data) return { ok: false, reason: 'already_completed' };
+
+  const { error: auditError } = await supabase.from('onboarding_quiz_responses').insert({
+    user_id: userId,
+    answers: audit.answers,
+    computed_score: score,
+    skipped: audit.skipped,
+  });
+  if (auditError) {
+    console.error(`completeOnboarding: audit insert failed for user ${userId}`, auditError);
+  }
+
+  const { error: metadataError } = await supabase.auth.admin.updateUserById(userId, {
+    app_metadata: { onboarding_completed: true },
+  });
+  if (metadataError) {
+    console.error(`completeOnboarding: app_metadata sync failed for user ${userId}`, metadataError);
+  }
+
+  return {
+    ok: true,
+    rating: toRatingDisplay(score, data.placement_sessions_remaining as number),
+  };
+}
+
+export async function submitOnboardingQuiz(userId: string, answers: OnboardingAnswers): Promise<OnboardingResult> {
+  const score = computeOnboardingScore(answers);
+  if (score === null) return { ok: false, reason: 'invalid_answers' };
+  return completeOnboarding(userId, score, { answers, skipped: false });
+}
+
+export async function skipOnboarding(userId: string): Promise<OnboardingResult> {
+  return completeOnboarding(userId, SKIP_DEFAULT_SCORE, { answers: null, skipped: true });
 }

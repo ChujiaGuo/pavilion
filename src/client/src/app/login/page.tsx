@@ -31,7 +31,7 @@ function LoginForm() {
     setIsSubmitting(true);
 
     const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (signInError) {
       setError(signInError.message);
@@ -39,7 +39,11 @@ function LoginForm() {
       return;
     }
 
-    router.push('/');
+    if (data.user.app_metadata?.onboarding_completed) {
+      router.replace('/');
+    } else {
+      router.replace('/onboarding/quiz');
+    }
   }
 
   return (

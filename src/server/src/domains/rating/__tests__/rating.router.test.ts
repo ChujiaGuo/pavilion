@@ -13,16 +13,26 @@ vi.mock('../rating.service.js', () => ({
   getUserRatingDisplay: vi.fn(),
   getRatingHistory: vi.fn(),
   submitRating: vi.fn(),
+  submitOnboardingQuiz: vi.fn(),
+  skipOnboarding: vi.fn(),
 }));
 
 import { supabase } from '../../../lib/supabase.js';
-import { getUserRatingDisplay, getRatingHistory, submitRating } from '../rating.service.js';
+import {
+  getUserRatingDisplay,
+  getRatingHistory,
+  submitRating,
+  submitOnboardingQuiz,
+  skipOnboarding,
+} from '../rating.service.js';
 import { ratingRouter } from '../rating.router.js';
 
 const mockGetUser = vi.mocked(supabase.auth.getUser);
 const mockGetUserRatingDisplay = vi.mocked(getUserRatingDisplay);
 const mockGetRatingHistory = vi.mocked(getRatingHistory);
 const mockSubmitRating = vi.mocked(submitRating);
+const mockSubmitOnboardingQuiz = vi.mocked(submitOnboardingQuiz);
+const mockSkipOnboarding = vi.mocked(skipOnboarding);
 
 const USER_ID = 'user-1';
 const SESSION_ID = 'session-1';
@@ -211,5 +221,89 @@ describe('GET /user/:userId/history', () => {
       expect(entry).not.toHaveProperty('raterId');
       expect(entry).not.toHaveProperty('vote');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /onboarding/submit
+// ---------------------------------------------------------------------------
+
+describe('POST /onboarding/submit', () => {
+  it('returns 401 when no Authorization header is present', async () => {
+    const res = await ratingRouter.request('/onboarding/submit', { method: 'POST', body: '{}' });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 400 when answers is missing', async () => {
+    const res = await ratingRouter.request('/onboarding/submit', {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    expect(mockSubmitOnboardingQuiz).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 on invalid_answers', async () => {
+    mockSubmitOnboardingQuiz.mockResolvedValue({ ok: false, reason: 'invalid_answers' });
+    const res = await ratingRouter.request('/onboarding/submit', {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers: { highest_level_played: 'bogus' } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 409 on already_completed', async () => {
+    mockSubmitOnboardingQuiz.mockResolvedValue({ ok: false, reason: 'already_completed' });
+    const res = await ratingRouter.request('/onboarding/submit', {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers: {} }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it('returns 201 with the rating display on success, submitting as the authenticated user', async () => {
+    mockSubmitOnboardingQuiz.mockResolvedValue({ ok: true, rating: RATING_DISPLAY });
+    const answers = {
+      highest_level_played: 'club_league',
+      strongest_opponents: 'competitive_club',
+      competitive_history: 'regional_sanctioned',
+      play_frequency: 'weekly',
+    };
+    const res = await ratingRouter.request('/onboarding/submit', {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers }),
+    });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ rating: RATING_DISPLAY });
+    expect(mockSubmitOnboardingQuiz).toHaveBeenCalledWith(USER_ID, answers);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /onboarding/skip
+// ---------------------------------------------------------------------------
+
+describe('POST /onboarding/skip', () => {
+  it('returns 401 when no Authorization header is present', async () => {
+    const res = await ratingRouter.request('/onboarding/skip', { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 409 on already_completed', async () => {
+    mockSkipOnboarding.mockResolvedValue({ ok: false, reason: 'already_completed' });
+    const res = await ratingRouter.request('/onboarding/skip', { method: 'POST', headers: withAuth() });
+    expect(res.status).toBe(409);
+  });
+
+  it('returns 201 with the rating display on success, for the authenticated user', async () => {
+    mockSkipOnboarding.mockResolvedValue({ ok: true, rating: RATING_DISPLAY });
+    const res = await ratingRouter.request('/onboarding/skip', { method: 'POST', headers: withAuth() });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ rating: RATING_DISPLAY });
+    expect(mockSkipOnboarding).toHaveBeenCalledWith(USER_ID);
   });
 });

@@ -8,8 +8,15 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // `next` is only ever explicitly set for the password-recovery flow
+      // (next=/reset-password) — respect it as-is there. Otherwise this is
+      // the Google sign-in/sign-up default, which needs the same
+      // onboarding-quiz gate the email/password login page applies.
+      if (next === '/' && !data.user?.app_metadata?.onboarding_completed) {
+        return NextResponse.redirect(`${origin}/onboarding/quiz`);
+      }
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

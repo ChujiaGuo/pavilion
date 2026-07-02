@@ -51,7 +51,8 @@ test('resets a password end-to-end via the emailed link and signs in with the ne
   await page.fill('#email', email);
   await page.fill('#password', newPassword);
   await page.getByRole('button', { name: 'Log in' }).click();
-  await page.waitForURL('/');
+  // This fixture user never completes onboarding, so login redirects to the quiz.
+  await page.waitForURL('/onboarding/quiz');
 
   await supabaseAdmin.auth.admin.deleteUser(userId);
 });

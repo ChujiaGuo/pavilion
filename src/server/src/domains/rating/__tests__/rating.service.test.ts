@@ -3,12 +3,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../../lib/supabase.js', () => ({
   supabase: {
     from: vi.fn(),
-    auth: { getUser: vi.fn() },
+    auth: { getUser: vi.fn(), admin: { updateUserById: vi.fn() } },
   },
 }));
 
 import { supabase } from '../../../lib/supabase.js';
-import { computeRatingUpdate, toRatingDisplay, submitRating, fullDaysElapsed } from '../rating.service.js';
+import {
+  computeRatingUpdate,
+  toRatingDisplay,
+  submitRating,
+  fullDaysElapsed,
+  submitOnboardingQuiz,
+  skipOnboarding,
+} from '../rating.service.js';
+import { computeOnboardingScore } from '../rating.algorithm.js';
 
 // ---------------------------------------------------------------------------
 // computeRatingUpdate — pure function, no mocking needed
@@ -742,5 +750,149 @@ describe('submitRating', () => {
     expect(profileUpdate['update']).toHaveBeenCalledWith(
       expect.objectContaining({ internal_score: 5.99, demotion_protection_started_at: null }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeOnboardingScore — pure function, no mocking needed
+// ---------------------------------------------------------------------------
+
+describe('computeOnboardingScore', () => {
+  const VALID_ANSWERS = {
+    highest_level_played: 'club_league',
+    strongest_opponents: 'competitive_club',
+    competitive_history: 'regional_sanctioned',
+    play_frequency: 'weekly',
+  };
+
+  it('averages the four mapped option scores', () => {
+    // (3.75 + 3.75 + 4.5 + 3.25) / 4 = 3.8125 -> rounds to 3.81
+    expect(computeOnboardingScore(VALID_ANSWERS)).toBeCloseTo(3.81, 2);
+  });
+
+  it('returns null when a required question is missing', () => {
+    const { play_frequency: _omit, ...incomplete } = VALID_ANSWERS;
+    expect(computeOnboardingScore(incomplete as any)).toBeNull();
+  });
+
+  it('returns null when an option id is not recognized for its question', () => {
+    expect(computeOnboardingScore({ ...VALID_ANSWERS, highest_level_played: 'bogus' })).toBeNull();
+  });
+
+  it('ignores unexpected extra keys without skewing the average', () => {
+    expect(computeOnboardingScore({ ...VALID_ANSWERS, extra_key: 'whatever' } as any)).toBeCloseTo(3.81, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// submitOnboardingQuiz / skipOnboarding — Supabase orchestration
+// ---------------------------------------------------------------------------
+
+describe('onboarding quiz submission', () => {
+  const ONBOARDING_USER_ID = 'user-onboarding';
+  const VALID_ANSWERS = {
+    highest_level_played: 'club_league',
+    strongest_opponents: 'competitive_club',
+    competitive_history: 'regional_sanctioned',
+    play_frequency: 'weekly',
+  };
+  const mockUpdateUserById = vi.mocked(supabase.auth.admin.updateUserById);
+
+  beforeEach(() => {
+    mockUpdateUserById.mockResolvedValue({ data: { user: {} }, error: null } as any);
+  });
+
+  describe('submitOnboardingQuiz', () => {
+    it('rejects incomplete answers without touching the database', async () => {
+      const { play_frequency: _omit, ...incomplete } = VALID_ANSWERS;
+      const result = await submitOnboardingQuiz(ONBOARDING_USER_ID, incomplete as any);
+      expect(result).toEqual({ ok: false, reason: 'invalid_answers' });
+      expect(mockFrom).not.toHaveBeenCalled();
+    });
+
+    it('writes the computed score, marks onboarding complete, and returns the rating display', async () => {
+      const profileUpdate = singleChain({ placement_sessions_remaining: 3 });
+      mockFrom.mockReturnValueOnce(profileUpdate).mockReturnValueOnce(okChain());
+
+      const result = await submitOnboardingQuiz(ONBOARDING_USER_ID, VALID_ANSWERS);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok result');
+      expect(result.rating).toEqual(toRatingDisplay(3.81, 3));
+
+      const updateArg = profileUpdate['update'].mock.calls[0][0] as Record<string, unknown>;
+      expect(updateArg.internal_score).toBeCloseTo(3.81, 2);
+      expect(typeof updateArg.onboarding_completed_at).toBe('string');
+      expect(profileUpdate['is']).toHaveBeenCalledWith('onboarding_completed_at', null);
+    });
+
+    it('records an audit row with the answers and computed score', async () => {
+      const auditInsert = okChain();
+      mockFrom
+        .mockReturnValueOnce(singleChain({ placement_sessions_remaining: 3 }))
+        .mockReturnValueOnce(auditInsert);
+
+      await submitOnboardingQuiz(ONBOARDING_USER_ID, VALID_ANSWERS);
+
+      expect(auditInsert['insert']).toHaveBeenCalledWith(
+        expect.objectContaining({ user_id: ONBOARDING_USER_ID, answers: VALID_ANSWERS, skipped: false }),
+      );
+    });
+
+    it('syncs app_metadata.onboarding_completed rather than the client-editable user_metadata', async () => {
+      mockFrom.mockReturnValueOnce(singleChain({ placement_sessions_remaining: 3 })).mockReturnValueOnce(okChain());
+
+      await submitOnboardingQuiz(ONBOARDING_USER_ID, VALID_ANSWERS);
+
+      expect(mockUpdateUserById).toHaveBeenCalledWith(ONBOARDING_USER_ID, {
+        app_metadata: { onboarding_completed: true },
+      });
+    });
+
+    it('returns already_completed when the claim update affects no rows', async () => {
+      mockFrom.mockReturnValueOnce(singleChain(null));
+
+      const result = await submitOnboardingQuiz(ONBOARDING_USER_ID, VALID_ANSWERS);
+
+      expect(result).toEqual({ ok: false, reason: 'already_completed' });
+      expect(mockUpdateUserById).not.toHaveBeenCalled();
+    });
+
+    it('still reports success when the best-effort audit insert or metadata sync fails', async () => {
+      const failedInsert = makeChain();
+      failedInsert.resolveAs({ error: new Error('insert failed') });
+      mockFrom.mockReturnValueOnce(singleChain({ placement_sessions_remaining: 3 })).mockReturnValueOnce(failedInsert);
+      mockUpdateUserById.mockResolvedValue({ data: null, error: new Error('sync failed') } as any);
+
+      const result = await submitOnboardingQuiz(ONBOARDING_USER_ID, VALID_ANSWERS);
+
+      expect(result.ok).toBe(true);
+    });
+  });
+
+  describe('skipOnboarding', () => {
+    it('writes the skip default score and marks the audit row as skipped', async () => {
+      const profileUpdate = singleChain({ placement_sessions_remaining: 3 });
+      const auditInsert = okChain();
+      mockFrom.mockReturnValueOnce(profileUpdate).mockReturnValueOnce(auditInsert);
+
+      const result = await skipOnboarding(ONBOARDING_USER_ID);
+
+      expect(result).toEqual({ ok: true, rating: toRatingDisplay(2.75, 3) });
+      expect(profileUpdate['update']).toHaveBeenCalledWith(
+        expect.objectContaining({ internal_score: 2.75 }),
+      );
+      expect(auditInsert['insert']).toHaveBeenCalledWith(
+        expect.objectContaining({ answers: null, skipped: true, computed_score: 2.75 }),
+      );
+    });
+
+    it('returns already_completed when the claim update affects no rows', async () => {
+      mockFrom.mockReturnValueOnce(singleChain(null));
+
+      const result = await skipOnboarding(ONBOARDING_USER_ID);
+
+      expect(result).toEqual({ ok: false, reason: 'already_completed' });
+    });
   });
 });

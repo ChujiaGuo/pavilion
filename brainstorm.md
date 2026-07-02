@@ -1,6 +1,6 @@
 # Pavilion — Brainstorm Notes
 
-_Last updated: 2026-07-01_
+_Last updated: 2026-07-02_
 
 ---
 
@@ -73,10 +73,11 @@ Drop-in badminton in the US is unstructured: mismatched skill levels, uncoordina
 
 ### 2. Skill Rating System
 
-**Onboarding / initial rating:**
-- Self-reported via a short quiz: highest level played, strongest opponents faced, competitive history, frequency of play, self-assessed weaknesses
-- Produces a provisional placement rating that carries low weight
-- First 3 sessions are *placement matches*: rating shifts faster (higher learning rate / larger delta multiplier) to get the player to their true level quickly, then stabilizes
+**Onboarding / initial rating — implemented:**
+- Self-reported via a short quiz, prompted after signup or on first login if not yet done: highest level played, strongest opponents faced, competitive history, frequency of play. ("Self-assessed weaknesses" was cut from v1's quiz — it's diagnostic rather than a skill-level signal, and no feature reads it yet; see "self-assessed weaknesses" in the Future Features Roadmap if a consumer for it materializes.)
+- Produces a provisional placement rating that carries low weight; see technical-notes.md "Onboarding placement quiz" for the scoring formula
+- Optional — skipping applies a fixed default score one grade below the calibration target (see technical-notes.md for the exact value) rather than blocking account use
+- First 3 sessions are *placement matches*: rating shifts faster (higher learning rate / larger delta multiplier) to get the player to their true level quickly, then stabilizes. This applies identically whether the initial score came from the quiz or the skip default.
 - After placement, normal weighting kicks in
 
 **Pickleball DUPR reference:**
@@ -164,6 +165,7 @@ Regional rating calibration and separate singles/doubles ratings are both deferr
 
 **Core identity:**
 - Display name, photo, location (city/region level — not exact address)
+- Legal first/last name — optional at signup, but required once a player is pro-tier verified (see "Rating locks and verification gates" below); distinct from the display name, and currently follows the same visibility rule as the rest of the profile (not specially hidden — revisit if that turns out to be too exposed for a legal name)
 - Rating grade + subtier (shown as label, not raw number)
 - Verified badge if pro-tier verified
 - Preferred format (singles, doubles, mixed doubles)
@@ -236,6 +238,7 @@ Everything not in MVP Scope (v1) below lives here. `technical-notes.md` only doc
 | Global rating distribution recalibration | Periodic admin/cron job to correct distribution drift (e.g. grade inflation) if it occurs over time. Not part of the live per-vote scoring path. | TBD |
 | Coordinated voting / anomaly batch detection | Same rater-ratee pair exceeding N sessions without fresh raters in between, coordinated voting pattern detection across accounts. Needs batch/cron analysis, not per-request logic. Partially mitigated today by the recency-adjusted familiarity weight, but not flagged. | TBD |
 | Venue edit-suggestion auto-notify | If enough edits are suggested for a venue that hasn't claimed its listing, notify the venue and prompt them to take ownership. `submitEditSuggestion` currently just inserts a row — no threshold or notification logic exists yet. | TBD |
+| Self-assessed weaknesses in onboarding quiz | Cut from v1's onboarding quiz — diagnostic rather than a skill-level signal, and nothing reads it yet. Worth adding back if a coaching/matching feature emerges that could consume it (e.g. Coach Discovery). | TBD |
 
 ---
 

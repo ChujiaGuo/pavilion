@@ -1,6 +1,6 @@
 # Database Schema
 
-_Last updated: 2026-07-01 (added `profiles.first_name`/`last_name`, required once `verified_tier` is set; added `venues.lng`/`lat` generated columns; added `service_role` schema GRANTs — see technical-notes.md "Environments"; corrected `internal_score`'s range)_
+_Last updated: 2026-07-02 (added `profiles.first_name`/`last_name`, required once `verified_tier` is set; added `venues.lng`/`lat` generated columns; added `service_role` schema GRANTs — see technical-notes.md "Environments"; corrected `internal_score`'s range; added `profiles.onboarding_completed_at` and the `onboarding_quiz_responses` table (`ON DELETE CASCADE` from `profiles`) for the onboarding placement quiz — see technical-notes.md's KI-004 for why that cascade matters and where it's still missing elsewhere)_
 
 PostgreSQL via Supabase. PostGIS extension enabled.
 
@@ -32,6 +32,7 @@ See `technical-notes.md` for lookup logic, derivation formulas, and access contr
 | `demotion_protection_started_at` | timestamptz | nullable. Set when a vote first trends the player below their current grade's floor; cleared on recovery or release |
 | `promotion_protection_started_at` | timestamptz | nullable. Same as above, for trending at/above the next grade's ceiling |
 | `session_count` | integer | default 0 |
+| `onboarding_completed_at` | timestamptz | nullable. Set when the onboarding placement quiz is submitted or skipped — null means the user is prompted on next login. See technical-notes.md "Onboarding placement quiz" |
 | `deleted_at` | timestamptz | nullable. Soft delete — null means active. |
 | `created_at` | timestamptz | |
 
@@ -198,6 +199,21 @@ UNIQUE `(session_id, rater_id, ratee_id)`.
 | `last_rated_at` | timestamptz | |
 
 Composite PK `(rater_id, ratee_id)`.
+
+---
+
+### `onboarding_quiz_responses`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `user_id` | uuid | FK → profiles |
+| `answers` | jsonb | nullable. Null when the user skipped instead of answering |
+| `computed_score` | numeric(5,2) | the resulting `internal_score` written to `profiles` at submission time |
+| `skipped` | boolean | default false |
+| `created_at` | timestamptz | |
+
+UNIQUE `(user_id)`. Audit trail only — mirrors why `rating_history` exists for peer votes. Not read by any endpoint; write-only via the onboarding submit/skip flow. See technical-notes.md "Onboarding placement quiz".
 
 ---
 

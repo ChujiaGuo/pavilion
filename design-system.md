@@ -1,6 +1,6 @@
 # Design System
 
-_Last updated: 2026-07-01_
+_Last updated: 2026-07-02_
 
 See `brainstorm.md` for product/feature decisions and `technical-notes.md` for architecture. This file is for front-end visual/thematic and UX decisions only — page-specific copy and layout live in the code itself once built, not here.
 
@@ -14,7 +14,7 @@ Mobile-first responsive web — see `technical-notes.md`'s "Platform" section fo
 
 ## Component Library
 
-- **shadcn/ui on top of Tailwind v4** — installed when the signup/login pages (the first form-heavy flow) were built. Current shadcn registry generates components on **Base UI** (`@base-ui/react`, the Radix/Floating UI/MUI-team successor to Radix Primitives), not Radix directly — same accessibility rationale (focus management, keyboard nav, ARIA) applies, just a different underlying package. `button.tsx`, `input.tsx`, `label.tsx` are in `src/client/src/components/ui/`. Add further primitives with `npx shadcn@latest add <name>` as new flows need them.
+- **shadcn/ui on top of Tailwind v4** — installed when the signup/login pages (the first form-heavy flow) were built. Current shadcn registry generates components on **Base UI** (`@base-ui/react`, the Radix/Floating UI/MUI-team successor to Radix Primitives), not Radix directly — same accessibility rationale (focus management, keyboard nav, ARIA) applies, just a different underlying package. `button.tsx`, `input.tsx`, `label.tsx`, `radio-group.tsx` (added for the onboarding quiz's single-choice steps) are in `src/client/src/components/ui/`. Add further primitives with `npx shadcn@latest add <name>` as new flows need them.
 - Tailwind v4 requires `@tailwindcss/postcss` in `client`'s devDependencies plus a `postcss.config.mjs` — without both, Tailwind classes silently no-op (the original placeholder page had Tailwind classes that were never actually being applied). Now installed and configured.
 - Logo — not yet decided.
 - **`GoogleSignInButton`** (`src/client/src/components/auth/google-sign-in-button.tsx`) is a deliberate exception to this app's own brand system — Google's Identity branding guidelines mandate its own colors (`#747775` border, `#1f1f1f` text, white background), unmodified multicolor "G" logo, own font stack (`Google Sans`/Roboto, not Nunito), and one of a fixed set of approved copy strings ("Sign in with Google" / "Sign up with Google" / "Continue with Google"). Don't restyle it to match the app's primary green / Nunito system — that would violate the guidelines.
@@ -67,4 +67,4 @@ Prefer hardcoded front-end content over a database table until there's an operat
 
 ## Component Architecture Conventions
 
-- **Multi-step/repeatable flows** (e.g. the onboarding placement quiz) should be config-driven: define steps as data (`id`, `prompt`, `type`, `options`) feeding one generic step-renderer component, rather than one bespoke component per step. Keeps adding/reordering/removing a step a data change, not a structural one.
+- **Multi-step/repeatable flows should be config-driven:** define steps as data (`id`, `prompt`, `type`, `options`) feeding one generic step-renderer component, rather than one bespoke component per step. Keeps adding/reordering/removing a step a data change, not a structural one. Implemented this way for the onboarding placement quiz (`src/client/src/app/onboarding/quiz/quiz-config.ts` + `page.tsx`) — follow the same shape for the next multi-step flow.
