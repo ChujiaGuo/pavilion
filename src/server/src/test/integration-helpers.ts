@@ -8,6 +8,9 @@ export async function createTestUser(
     internalScore?: number;
     ratingFloor?: number | null;
     placementSessionsRemaining?: number;
+    firstName?: string | null;
+    lastName?: string | null;
+    verifiedTier?: number | null;
   } = {},
 ) {
   const email = opts.email ?? `test-${randomUUID()}@example.test`;
@@ -23,7 +26,10 @@ export async function createTestUser(
   if (
     opts.internalScore !== undefined ||
     opts.ratingFloor !== undefined ||
-    opts.placementSessionsRemaining !== undefined
+    opts.placementSessionsRemaining !== undefined ||
+    opts.firstName !== undefined ||
+    opts.lastName !== undefined ||
+    opts.verifiedTier !== undefined
   ) {
     const updates: Record<string, unknown> = {};
     if (opts.internalScore !== undefined) updates.internal_score = opts.internalScore;
@@ -31,6 +37,9 @@ export async function createTestUser(
     if (opts.placementSessionsRemaining !== undefined) {
       updates.placement_sessions_remaining = opts.placementSessionsRemaining;
     }
+    if (opts.firstName !== undefined) updates.first_name = opts.firstName;
+    if (opts.lastName !== undefined) updates.last_name = opts.lastName;
+    if (opts.verifiedTier !== undefined) updates.verified_tier = opts.verifiedTier;
     const { error: updateError } = await supabase.from('profiles').update(updates).eq('id', data.user.id);
     if (updateError) throw new Error(`createTestUser profile patch failed: ${updateError.message}`);
   }

@@ -5,6 +5,8 @@ export type PlayStyle = 'competitive' | 'social' | 'training';
 export interface User {
   id: string;
   displayName: string;
+  firstName: string | null;
+  lastName: string | null;
   photoUrl: string | null;
   city: string;
   region: string;

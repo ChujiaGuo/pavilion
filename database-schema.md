@@ -1,6 +1,6 @@
 # Database Schema
 
-_Last updated: 2026-06-30 (added `venues.lng`/`lat` generated columns; added `service_role` schema GRANTs — see technical-notes.md "Environments"; corrected `internal_score`'s range)_
+_Last updated: 2026-07-01 (added `profiles.first_name`/`last_name`, required once `verified_tier` is set; added `venues.lng`/`lat` generated columns; added `service_role` schema GRANTs — see technical-notes.md "Environments"; corrected `internal_score`'s range)_
 
 PostgreSQL via Supabase. PostGIS extension enabled.
 
@@ -16,6 +16,8 @@ See `technical-notes.md` for lookup logic, derivation formulas, and access contr
 |---|---|---|
 | `id` | uuid PK | FK → auth.users |
 | `display_name` | text | |
+| `first_name` | text | nullable. Required if `verified_tier` is set — enforced by `profiles_verified_requires_name` CHECK constraint |
+| `last_name` | text | nullable. Same requirement as `first_name` |
 | `photo_url` | text | nullable |
 | `city` | text | |
 | `region` | text | |

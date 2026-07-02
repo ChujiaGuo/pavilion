@@ -28,6 +28,8 @@ const mockFrom = vi.mocked(supabase.from);
 const BASE_ROW = {
   id: 'user-1',
   display_name: 'Alice',
+  first_name: null,
+  last_name: null,
   photo_url: null,
   city: 'Vancouver',
   region: 'BC',
@@ -115,6 +117,8 @@ describe('updateUser', () => {
 
     await updateUser('user-1', {
       displayName: 'Bob',
+      firstName: 'Bob',
+      lastName: 'Smith',
       photoUrl: 'https://img.example.com/a.jpg',
       playStyle: 'competitive',
     });
@@ -122,6 +126,8 @@ describe('updateUser', () => {
     expect(chain['update']).toHaveBeenCalledWith(
       expect.objectContaining({
         display_name: 'Bob',
+        first_name: 'Bob',
+        last_name: 'Smith',
         photo_url: 'https://img.example.com/a.jpg',
         play_style: 'competitive',
       })

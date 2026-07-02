@@ -27,6 +27,8 @@ const USER_ID = 'user-1';
 const USER_ROW = {
   id: USER_ID,
   display_name: 'Alice',
+  first_name: null,
+  last_name: null,
   photo_url: null,
   city: 'Vancouver',
   region: 'BC',

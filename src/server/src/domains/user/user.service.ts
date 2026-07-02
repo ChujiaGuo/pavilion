@@ -4,6 +4,8 @@ import type { User } from '@pavilion/types';
 type UserRow = {
   id: string;
   display_name: string;
+  first_name: string | null;
+  last_name: string | null;
   photo_url: string | null;
   city: string;
   region: string;
@@ -16,16 +18,18 @@ type UserRow = {
 };
 
 const PROFILE_SELECT =
-  'id, display_name, photo_url, city, region, preferred_formats, play_style, privacy_level, verified_tier, rating_floor, created_at';
+  'id, display_name, first_name, last_name, photo_url, city, region, preferred_formats, play_style, privacy_level, verified_tier, rating_floor, created_at';
 
 type UserUpdateFields = Partial<Pick<User,
-  'displayName' | 'photoUrl' | 'city' | 'region' | 'preferredFormats' | 'playStyle' | 'privacyLevel'
+  'displayName' | 'firstName' | 'lastName' | 'photoUrl' | 'city' | 'region' | 'preferredFormats' | 'playStyle' | 'privacyLevel'
 >>;
 
 function toUser(row: UserRow): User {
   return {
     id: row.id,
     displayName: row.display_name,
+    firstName: row.first_name,
+    lastName: row.last_name,
     photoUrl: row.photo_url,
     city: row.city,
     region: row.region,
@@ -57,6 +61,8 @@ export async function getUserById(id: string, requesterId: string): Promise<User
 export async function updateUser(id: string, fields: UserUpdateFields): Promise<User | null> {
   const updates: Record<string, unknown> = {};
   if (fields.displayName !== undefined) updates.display_name = fields.displayName;
+  if (fields.firstName !== undefined) updates.first_name = fields.firstName;
+  if (fields.lastName !== undefined) updates.last_name = fields.lastName;
   if (fields.photoUrl !== undefined) updates.photo_url = fields.photoUrl;
   if (fields.city !== undefined) updates.city = fields.city;
   if (fields.region !== undefined) updates.region = fields.region;
