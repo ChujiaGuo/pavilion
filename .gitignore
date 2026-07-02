@@ -6,3 +6,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Supabase CLI env() interpolation for config.toml
+.env

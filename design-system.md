@@ -14,9 +14,10 @@ Mobile-first responsive web — see `technical-notes.md`'s "Platform" section fo
 
 ## Component Library
 
-- **shadcn/ui + Radix primitives** on top of Tailwind v4 — chosen (not yet installed) for when the form-heavy flows get built (signup, the multi-step onboarding quiz, RSVP), since Radix's built-in accessibility (focus management, keyboard nav, ARIA) beats hand-rolling form/dialog/input components. The landing page didn't need it (no forms/dialogs), so it was built with plain Tailwind; install it when the first form-heavy flow is implemented.
+- **shadcn/ui on top of Tailwind v4** — installed when the signup/login pages (the first form-heavy flow) were built. Current shadcn registry generates components on **Base UI** (`@base-ui/react`, the Radix/Floating UI/MUI-team successor to Radix Primitives), not Radix directly — same accessibility rationale (focus management, keyboard nav, ARIA) applies, just a different underlying package. `button.tsx`, `input.tsx`, `label.tsx` are in `src/client/src/components/ui/`. Add further primitives with `npx shadcn@latest add <name>` as new flows need them.
 - Tailwind v4 requires `@tailwindcss/postcss` in `client`'s devDependencies plus a `postcss.config.mjs` — without both, Tailwind classes silently no-op (the original placeholder page had Tailwind classes that were never actually being applied). Now installed and configured.
 - Logo — not yet decided.
+- **`GoogleSignInButton`** (`src/client/src/components/auth/google-sign-in-button.tsx`) is a deliberate exception to this app's own brand system — Google's Identity branding guidelines mandate its own colors (`#747775` border, `#1f1f1f` text, white background), unmodified multicolor "G" logo, own font stack (`Google Sans`/Roboto, not Nunito), and one of a fixed set of approved copy strings ("Sign in with Google" / "Sign up with Google" / "Continue with Google"). Don't restyle it to match the app's primary green / Nunito system — that would violate the guidelines.
 
 ---
 
@@ -44,16 +45,17 @@ Superseded the earlier card/shadow/per-section-background approach below after i
 - **Real content lives in a center 2/3 column on desktop** (the shared `content` wrapper, `lg:w-2/3 lg:mx-auto`), so wide viewports don't stretch text into an awkward edge-to-edge spread. Below `lg`, content uses the full width with `px-6`/`sm:px-12` padding.
 - **Asymmetry over centered/grid-locked layouts.** Hero headline anchors left across 8 of 12 columns; subhead+CTA sit offset lower-right in the remaining 4. `How it works` rows alternate `justify-end`/left on odd/even index. Launch-region cities are a right-aligned flowing line against a left-aligned label, not centered chips.
 - **Fluid, uneven spacing.** Section padding ranges roughly `py-20` to `py-48`; tight-tracked uppercase eyebrow labels (`text-sm tracking-[0.2em]`) sit next to `text-7xl` headlines — deliberate contrast, not a uniform scale.
-- shadcn/ui still isn't installed (see Component Library above) — the landing page has no forms/dialogs, so there's nothing to re-skin yet. Revisit its default styling (strip borders/shadows to match this direction) whenever the first form-heavy flow pulls it in.
+- shadcn/ui is now installed (see Component Library above). Its current default component styling (v4.12 registry) already has no shadows and only a plain 1px border on form controls, so it matched this direction out of the box on the signup/login pages — no re-skinning was needed. Revisit if a future `add` pulls in a component with heavier default chrome (e.g. `card`, `dialog`).
 
 ---
 
 ## UX Principles
 
 - **Single primary CTA per screen** — no competing actions fighting for attention. Established on the landing page hero; applies to any screen with a clear next action.
-- **Lowest friction on high-frequency actions** — account signup is a bare-minimum form (email, password, display name, city); profile-polish fields (preferred format, play style) are deferred to a post-onboarding nudge rather than blocking account creation. Mirrors the one-tap RSVP friction principle in `brainstorm.md`.
+- **Lowest friction on high-frequency actions** — account signup's *required* fields stay bare-minimum (email, password, display name, city); profile-polish fields (preferred format, play style) are deferred to a post-onboarding nudge rather than blocking account creation. First/last name are also on the signup form but optional, not required — they're nullable until a user is verification-tier verified (see technical-notes.md "Auth"), so offering them upfront doesn't add friction. Mirrors the one-tap RSVP friction principle in `brainstorm.md`.
 - **No fabricated trust signals** — don't show testimonials, user counts, or activity stats before they're real. Omit a section rather than fake it.
 - **Copy accuracy over polish** — don't word a feature to imply more automation than exists (e.g., avoid phrasing that suggests the app books the court for you — it doesn't; see `brainstorm.md`'s Booking model). Describe what the coordination layer actually does.
+- **Required-field marker — themed icon, not a generic asterisk/dot.** A small red badminton shuttlecock icon (`RequiredMarker`, `src/client/src/components/ui/required-marker.tsx`) marks required inputs, next to a "[icon] indicates a required field" disclaimer, on any form that mixes required and optional fields (introduced on signup, where first/last name are optional alongside the required set). Skip it on forms where every field is required (e.g. login) — marking everything is redundant. Source SVG at `src/client/src/assets/birdie.svg` (SVG Repo), recolored from its original black fill to the app's `text-destructive` red via `currentColor`, mirrored horizontally from the original.
 
 ---
 

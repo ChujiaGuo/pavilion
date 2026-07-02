@@ -5,6 +5,7 @@ node_modules/
 dist/
 .next/
 *.tsbuildinfo
+/client/next-env.d.ts
 
 # Playwright
 /client/test-results/
