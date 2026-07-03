@@ -5,6 +5,7 @@ import {
   getSessionById,
   listSessions,
   getSessionRsvps,
+  getSessionOrganizerName,
   getMyRsvp,
   createSession,
   updateSession,
@@ -15,6 +16,7 @@ import {
   cancelRsvp,
   type JoinResult,
   type ProgressStatusResult,
+  type UpdateSessionResult,
 } from './session.service.js';
 
 export const sessionRouter = new Hono<{ Variables: { userId: string } }>();
@@ -24,6 +26,16 @@ const VALID_TYPES: SessionType[] = ['drop_in', 'organizer_hosted'];
 const VALID_FORMATS: SessionFormat[] = ['casual_rotation', 'king_of_the_court', 'round_robin'];
 const VALID_VISIBILITIES: SessionVisibility[] = ['public', 'invite_only'];
 const VALID_SHUTTLE_POLICIES: ShuttlePolicy[] = ['bring_your_own', 'split_cost', 'provided'];
+
+// sessions.skill_min/skill_max are numeric(4,2) (database-schema.md) — a
+// value whose integer part has more than 2 digits (>= 100 or <= -100)
+// overflows Postgres's numeric type and previously surfaced as an unhandled
+// 500 instead of a clean 400 (see technical-notes.md's KI-007). MIN_SKILL
+// matches rating.algorithm.ts's MIN_SCORE — no player is ever rated below it.
+const MIN_SKILL = 1;
+const MAX_SKILL = 99.99;
+// sessions.shuttle_tube_price is numeric(6,2) — same overflow risk.
+const MAX_SHUTTLE_TUBE_PRICE = 9999.99;
 
 const JOIN_REASON_STATUS: Record<
   Extract<JoinResult, { ok: false }>['reason'],
@@ -43,6 +55,102 @@ const PROGRESS_REASON_STATUS: Record<
   forbidden: 403,
   invalid_transition: 409,
 };
+
+const UPDATE_REASON_STATUS: Record<Extract<UpdateSessionResult, { ok: false }>['reason'], 400 | 404> = {
+  not_found: 404,
+  invalid_skill_range: 400,
+};
+
+// Validates whichever of these fields are present — every field is optional
+// here since PATCH sends a partial body. Shared by POST / and PATCH /:id so
+// both paths get the same protection, rather than POST alone having checks
+// and PATCH having none (the gap that let a skill value like 123 reach the
+// DB and crash with a numeric overflow — see KI-007).
+function validateSessionFieldValues(fields: {
+  venueName?: unknown;
+  type?: unknown;
+  format?: unknown;
+  visibility?: unknown;
+  shuttlePolicy?: unknown;
+  skillMin?: unknown;
+  skillMax?: unknown;
+  courtCount?: unknown;
+  maxPlayers?: unknown;
+  startsAt?: unknown;
+  durationMinutes?: unknown;
+  shuttleTubePrice?: unknown;
+  notes?: unknown;
+  strictRange?: unknown;
+}): string | null {
+  if (fields.venueName !== undefined && (typeof fields.venueName !== 'string' || fields.venueName.trim() === '')) {
+    return 'venueName must be a non-empty string';
+  }
+  if (fields.type !== undefined && !VALID_TYPES.includes(fields.type as SessionType)) {
+    return 'Invalid type';
+  }
+  if (fields.format !== undefined && !VALID_FORMATS.includes(fields.format as SessionFormat)) {
+    return 'Invalid format';
+  }
+  if (fields.visibility !== undefined && !VALID_VISIBILITIES.includes(fields.visibility as SessionVisibility)) {
+    return 'Invalid visibility';
+  }
+  if (fields.shuttlePolicy !== undefined && !VALID_SHUTTLE_POLICIES.includes(fields.shuttlePolicy as ShuttlePolicy)) {
+    return 'Invalid shuttlePolicy';
+  }
+
+  let skillMinNum: number | undefined;
+  let skillMaxNum: number | undefined;
+  if (fields.skillMin !== undefined) {
+    skillMinNum = Number(fields.skillMin);
+    if (isNaN(skillMinNum)) return 'skillMin must be a number';
+    if (skillMinNum < MIN_SKILL || skillMinNum > MAX_SKILL) {
+      return `skillMin must be between ${MIN_SKILL} and ${MAX_SKILL}`;
+    }
+  }
+  if (fields.skillMax !== undefined) {
+    skillMaxNum = Number(fields.skillMax);
+    if (isNaN(skillMaxNum)) return 'skillMax must be a number';
+    if (skillMaxNum < MIN_SKILL || skillMaxNum > MAX_SKILL) {
+      return `skillMax must be between ${MIN_SKILL} and ${MAX_SKILL}`;
+    }
+  }
+  if (skillMinNum !== undefined && skillMaxNum !== undefined && skillMinNum >= skillMaxNum) {
+    return 'skillMin must be less than skillMax';
+  }
+
+  if (fields.courtCount !== undefined && (!Number.isFinite(Number(fields.courtCount)) || Number(fields.courtCount) < 1)) {
+    return 'courtCount must be at least 1';
+  }
+  if (fields.maxPlayers !== undefined && (!Number.isFinite(Number(fields.maxPlayers)) || Number(fields.maxPlayers) < 1)) {
+    return 'maxPlayers must be at least 1';
+  }
+  if (
+    fields.durationMinutes !== undefined &&
+    (!Number.isFinite(Number(fields.durationMinutes)) || Number(fields.durationMinutes) < 1)
+  ) {
+    return 'durationMinutes must be at least 1';
+  }
+  if (fields.shuttleTubePrice !== undefined && fields.shuttleTubePrice !== null) {
+    const n = Number(fields.shuttleTubePrice);
+    if (isNaN(n) || n < 0 || n > MAX_SHUTTLE_TUBE_PRICE) {
+      return `shuttleTubePrice must be between 0 and ${MAX_SHUTTLE_TUBE_PRICE}`;
+    }
+  }
+  if (fields.notes !== undefined && fields.notes !== null && typeof fields.notes !== 'string') {
+    return 'notes must be a string or null';
+  }
+  if (fields.strictRange !== undefined && typeof fields.strictRange !== 'boolean') {
+    return 'strictRange must be a boolean';
+  }
+  if (
+    fields.startsAt !== undefined &&
+    (typeof fields.startsAt !== 'string' || isNaN(Date.parse(fields.startsAt)))
+  ) {
+    return 'startsAt must be a valid date string';
+  }
+
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // GET / — list sessions
@@ -128,18 +236,14 @@ sessionRouter.post('/', auth, async (c) => {
     return c.json({ error: 'Missing required fields' }, 400);
   }
 
-  if (!VALID_TYPES.includes(type as SessionType)) return c.json({ error: 'Invalid type' }, 400);
-  if (!VALID_FORMATS.includes(format as SessionFormat)) return c.json({ error: 'Invalid format' }, 400);
-  if (!VALID_VISIBILITIES.includes(visibility as SessionVisibility)) return c.json({ error: 'Invalid visibility' }, 400);
-  if (!VALID_SHUTTLE_POLICIES.includes(shuttlePolicy as ShuttlePolicy)) return c.json({ error: 'Invalid shuttlePolicy' }, 400);
+  const validationError = validateSessionFieldValues({
+    venueName, type, format, visibility, shuttlePolicy, startsAt,
+    skillMin, skillMax, courtCount, maxPlayers, durationMinutes, shuttleTubePrice, notes,
+  });
+  if (validationError) return c.json({ error: validationError }, 400);
 
   const skillMinNum = Number(skillMin);
   const skillMaxNum = Number(skillMax);
-  if (isNaN(skillMinNum) || isNaN(skillMaxNum)) {
-    return c.json({ error: 'skillMin and skillMax must be numbers' }, 400);
-  }
-  if (skillMinNum >= skillMaxNum) return c.json({ error: 'skillMin must be less than skillMax' }, 400);
-  if ((maxPlayers as number) < 1) return c.json({ error: 'maxPlayers must be at least 1' }, 400);
 
   const result = await createSession(c.get('userId'), {
     venueId: venueId as string | null | undefined,
@@ -177,12 +281,14 @@ sessionRouter.get('/:id', async (c) => {
   const session = await getSessionById(c.req.param('id'));
   if (!session) return c.json({ error: 'Not found' }, 404);
 
-  if (session.visibility === 'invite_only') {
-    const requestingUserId = await getOptionalUserId(c);
-    if (!requestingUserId) return c.json({ error: 'Forbidden' }, 403);
+  const requestingUserId = await getOptionalUserId(c);
+
+  if (session.visibility === 'invite_only' && !requestingUserId) {
+    return c.json({ error: 'Forbidden' }, 403);
   }
 
-  return c.json(session);
+  const organizerName = await getSessionOrganizerName(session.id, session.organizerId, requestingUserId);
+  return c.json({ ...session, organizerName });
 });
 
 // ---------------------------------------------------------------------------
@@ -191,9 +297,22 @@ sessionRouter.get('/:id', async (c) => {
 
 sessionRouter.patch('/:id', auth, async (c) => {
   const body = await c.req.json();
-  const session = await updateSession(c.req.param('id'), c.get('userId'), body);
-  if (!session) return c.json({ error: 'Not found or forbidden' }, 404);
-  return c.json(session);
+  const {
+    venueName, format, visibility, skillMin, skillMax, strictRange,
+    courtCount, maxPlayers, startsAt, durationMinutes, shuttlePolicy, shuttleTubePrice, notes,
+  } = body as Record<string, unknown>;
+
+  const validationError = validateSessionFieldValues({
+    venueName, format, visibility, shuttlePolicy, startsAt,
+    skillMin, skillMax, courtCount, maxPlayers, durationMinutes, shuttleTubePrice, notes, strictRange,
+  });
+  if (validationError) return c.json({ error: validationError }, 400);
+
+  const result = await updateSession(c.req.param('id'), c.get('userId'), body);
+  if (!result.ok) {
+    return c.json({ error: result.reason }, UPDATE_REASON_STATUS[result.reason]);
+  }
+  return c.json(result.session);
 });
 
 // ---------------------------------------------------------------------------
@@ -246,12 +365,13 @@ sessionRouter.get('/:id/rsvps', async (c) => {
   const session = await getSessionById(c.req.param('id'));
   if (!session) return c.json({ error: 'Not found' }, 404);
 
-  if (session.visibility === 'invite_only') {
-    const requestingUserId = await getOptionalUserId(c);
-    if (!requestingUserId) return c.json({ error: 'Forbidden' }, 403);
+  const requestingUserId = await getOptionalUserId(c);
+
+  if (session.visibility === 'invite_only' && !requestingUserId) {
+    return c.json({ error: 'Forbidden' }, 403);
   }
 
-  const rsvps = await getSessionRsvps(c.req.param('id'));
+  const rsvps = await getSessionRsvps(session.id, requestingUserId, session.organizerId);
   return c.json({ rsvps });
 });
 

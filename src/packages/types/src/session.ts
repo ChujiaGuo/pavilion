@@ -35,4 +35,8 @@ export interface SessionRsvp {
   userId: string;
   status: RsvpStatus;
   joinedAt: string;
+  // Only populated when the caller shares this session with this attendee
+  // (the organizer, or another active participant) — see
+  // session.service.ts's getSessionRsvps. Omitted/null otherwise.
+  displayName?: string | null;
 }

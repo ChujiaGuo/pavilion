@@ -183,7 +183,7 @@ Regional rating calibration and separate singles/doubles ratings are both deferr
 - Ability to follow players — useful for "I want to know when this person is playing next"
 
 **Privacy — default private, opt-in public:**
-- All profile fields default to private (visible only to people who've shared a session)
+- All profile fields default to private — only a player's name/display name is visible to anyone who's shared a session with them (e.g., in an attendee list); the actual profile page itself stays private unless they opt in
 - Players opt in to making their profile, session attendance, and venue activity publicly visible
 - Location is always city/region level maximum — never exact
 

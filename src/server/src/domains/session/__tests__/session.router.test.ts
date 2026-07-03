@@ -11,6 +11,7 @@ vi.mock('../session.service.js', () => ({
   getSessionById: vi.fn(),
   listSessions: vi.fn(),
   getSessionRsvps: vi.fn(),
+  getSessionOrganizerName: vi.fn(),
   getMyRsvp: vi.fn(),
   createSession: vi.fn(),
   updateSession: vi.fn(),
@@ -26,6 +27,7 @@ import {
   getSessionById,
   listSessions,
   getSessionRsvps,
+  getSessionOrganizerName,
   getMyRsvp,
   createSession,
   updateSession,
@@ -41,6 +43,7 @@ const mockGetUser = vi.mocked(supabase.auth.getUser);
 const mockGetSessionById = vi.mocked(getSessionById);
 const mockListSessions = vi.mocked(listSessions);
 const mockGetSessionRsvps = vi.mocked(getSessionRsvps);
+const mockGetSessionOrganizerName = vi.mocked(getSessionOrganizerName);
 const mockGetMyRsvp = vi.mocked(getMyRsvp);
 const mockCreateSession = vi.mocked(createSession);
 const mockUpdateSession = vi.mocked(updateSession);
@@ -253,6 +256,26 @@ describe('POST /', () => {
     expect(res.status).toBe(400);
   });
 
+  it('returns 400 (not a 500 from a Postgres numeric overflow) when skillMax exceeds the numeric(4,2) column ceiling', async () => {
+    const res = await sessionRouter.request('/', {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...VALID_CREATE_BODY, skillMax: 123 }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 (not a 500 from a bad timestamptz insert) when startsAt is not a parseable date', async () => {
+    const res = await sessionRouter.request('/', {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...VALID_CREATE_BODY, startsAt: 'not-a-date' }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
+
   it('returns 201 with session on success', async () => {
     mockCreateSession.mockResolvedValue({ session: BASE_SESSION as any });
 
@@ -304,6 +327,16 @@ describe('GET /:id', () => {
     expect((await res.json()).id).toBe(SESSION_ID);
   });
 
+  it('includes organizerName resolved via getSessionOrganizerName', async () => {
+    mockGetSessionById.mockResolvedValue(BASE_SESSION as any);
+    mockGetSessionOrganizerName.mockResolvedValue('Jane Organizer');
+
+    const res = await sessionRouter.request(`/${SESSION_ID}`);
+    const body = await res.json();
+    expect(body.organizerName).toBe('Jane Organizer');
+    expect(mockGetSessionOrganizerName).toHaveBeenCalledWith(SESSION_ID, USER_ID, undefined);
+  });
+
   it('returns 404 when session not found', async () => {
     mockGetSessionById.mockResolvedValue(null);
 
@@ -325,6 +358,15 @@ describe('GET /:id', () => {
     expect(res.status).toBe(200);
     expect((await res.json()).id).toBe(SESSION_ID);
   });
+
+  it('passes the authenticated caller id through to getSessionOrganizerName', async () => {
+    mockGetSessionById.mockResolvedValue(BASE_SESSION as any);
+    mockGetSessionOrganizerName.mockResolvedValue('Jane Organizer');
+
+    const res = await sessionRouter.request(`/${SESSION_ID}`, { headers: withAuth('attendee-1') });
+    expect(res.status).toBe(200);
+    expect(mockGetSessionOrganizerName).toHaveBeenCalledWith(SESSION_ID, USER_ID, 'attendee-1');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -338,7 +380,7 @@ describe('PATCH /:id', () => {
   });
 
   it('returns 200 with updated session', async () => {
-    mockUpdateSession.mockResolvedValue({ ...BASE_SESSION, notes: 'bring water' } as any);
+    mockUpdateSession.mockResolvedValue({ ok: true, session: { ...BASE_SESSION, notes: 'bring water' } } as any);
 
     const res = await sessionRouter.request(`/${SESSION_ID}`, {
       method: 'PATCH',
@@ -350,7 +392,7 @@ describe('PATCH /:id', () => {
   });
 
   it('returns 404 when not found or not organizer', async () => {
-    mockUpdateSession.mockResolvedValue(null);
+    mockUpdateSession.mockResolvedValue({ ok: false, reason: 'not_found' } as any);
 
     const res = await sessionRouter.request(`/${SESSION_ID}`, {
       method: 'PATCH',
@@ -358,6 +400,37 @@ describe('PATCH /:id', () => {
       body: JSON.stringify({ notes: 'x' }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it('returns 400 when skillMin >= skillMax in the same patch', async () => {
+    const res = await sessionRouter.request(`/${SESSION_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skillMin: 5, skillMax: 3 }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockUpdateSession).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when skillMax overflows the numeric(4,2) column', async () => {
+    const res = await sessionRouter.request(`/${SESSION_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skillMax: 123 }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockUpdateSession).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when the service reports an invalid cross-field skill range', async () => {
+    mockUpdateSession.mockResolvedValue({ ok: false, reason: 'invalid_skill_range' } as any);
+
+    const res = await sessionRouter.request(`/${SESSION_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skillMin: 6 }),
+    });
+    expect(res.status).toBe(400);
   });
 });
 
@@ -560,6 +633,14 @@ describe('GET /:id/rsvps', () => {
     const res = await sessionRouter.request(`/${SESSION_ID}/rsvps`, { headers: withAuth() });
     expect(res.status).toBe(200);
     expect((await res.json()).rsvps).toHaveLength(1);
+  });
+
+  it('passes the requesting caller id and organizerId through to getSessionRsvps', async () => {
+    mockGetSessionById.mockResolvedValue(BASE_SESSION as any);
+    mockGetSessionRsvps.mockResolvedValue([]);
+
+    await sessionRouter.request(`/${SESSION_ID}/rsvps`, { headers: withAuth('attendee-1') });
+    expect(mockGetSessionRsvps).toHaveBeenCalledWith(SESSION_ID, 'attendee-1', USER_ID);
   });
 });
 

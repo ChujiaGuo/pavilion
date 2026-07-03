@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "demo:rating": "tsx src/domains/rating/rating.demo.ts"
+    "demo:rating": "tsx src/domains/rating/rating.demo.ts",
+    "seed:sessions": "tsx --env-file=.env.local src/scripts/seed-sessions.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.4",

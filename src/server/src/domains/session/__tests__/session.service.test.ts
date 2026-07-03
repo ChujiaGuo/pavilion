@@ -14,6 +14,7 @@ import {
   getSessionById,
   listSessions,
   getSessionRsvps,
+  getSessionOrganizerName,
   getMyRsvp,
   createSession,
   updateSession,
@@ -375,8 +376,9 @@ describe('updateSession', () => {
       error: null,
     });
 
-    const session = await updateSession(SESSION_ID, ORGANIZER_ID, { notes: 'bring water' });
-    expect(session?.notes).toBe('bring water');
+    const result = await updateSession(SESSION_ID, ORGANIZER_ID, { notes: 'bring water' });
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.session.notes).toBe('bring water');
   });
 
   it('maps camelCase fields to snake_case DB columns', async () => {
@@ -390,12 +392,77 @@ describe('updateSession', () => {
     );
   });
 
-  it('returns null when session not found or user is not organizer', async () => {
+  it('returns not_found when session not found or user is not organizer', async () => {
     const chain = makeChain();
     mockFrom.mockReturnValue(chain as any);
     chain['single'].mockResolvedValue({ data: null, error: new Error('no rows') });
 
-    expect(await updateSession(SESSION_ID, 'other-user', { notes: 'x' })).toBeNull();
+    expect(await updateSession(SESSION_ID, 'other-user', { notes: 'x' })).toEqual({
+      ok: false,
+      reason: 'not_found',
+    });
+  });
+
+  it('validates skillMin against the current skillMax when only skillMin is patched', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    // First .single() is the pre-update fetch of the current skill pair
+    // (skill_max: 5.0), second would be the UPDATE's .select().single() —
+    // never reached here since the cross-field check fails first.
+    chain['single'].mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null });
+
+    const result = await updateSession(SESSION_ID, ORGANIZER_ID, { skillMin: 6 });
+    expect(result).toEqual({ ok: false, reason: 'invalid_skill_range' });
+    // The UPDATE itself must never fire once validation fails.
+    expect(chain['update']).not.toHaveBeenCalled();
+  });
+
+  it('validates skillMax against the current skillMin when only skillMax is patched', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null });
+
+    const result = await updateSession(SESSION_ID, ORGANIZER_ID, { skillMax: 2 });
+    expect(result).toEqual({ ok: false, reason: 'invalid_skill_range' });
+    expect(chain['update']).not.toHaveBeenCalled();
+  });
+
+  it('allows a valid partial skill update once checked against the current pair', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single']
+      .mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null }) // pre-update fetch
+      .mockResolvedValueOnce({ data: { ...BASE_SESSION_ROW, skill_min: 4.0 }, error: null }); // UPDATE result
+
+    const result = await updateSession(SESSION_ID, ORGANIZER_ID, { skillMin: 4 });
+    expect(result.ok).toBe(true);
+    expect(chain['update']).toHaveBeenCalledWith(expect.objectContaining({ skill_min: 4 }));
+  });
+
+  it('maps a DB check_violation on the UPDATE to invalid_skill_range (the race the pre-fetch alone cannot catch)', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    // Pre-fetch reads a still-valid pair (as if a concurrent request hasn't
+    // committed its own patch yet) so the app-level check here passes...
+    chain['single']
+      .mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null })
+      // ...but by the time this UPDATE runs, the row has already been
+      // patched by that concurrent request and now violates
+      // sessions_skill_range_valid (23514 = check_violation).
+      .mockResolvedValueOnce({ data: null, error: { code: '23514', message: 'check constraint violated' } });
+
+    const result = await updateSession(SESSION_ID, ORGANIZER_ID, { skillMin: 4.5 });
+    expect(result).toEqual({ ok: false, reason: 'invalid_skill_range' });
+  });
+
+  it('skips the pre-update fetch entirely when neither skill field is patched', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: BASE_SESSION_ROW, error: null });
+
+    await updateSession(SESSION_ID, ORGANIZER_ID, { notes: 'no skill change' });
+    // Only one .single() call (the UPDATE's) — no pre-fetch.
+    expect(chain['single']).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1125,6 +1192,103 @@ describe('getSessionRsvps', () => {
     const rsvps = await getSessionRsvps(SESSION_ID);
     expect(rsvps).toHaveLength(1);
     expect(rsvps[0].userId).toBe(USER_ID);
+  });
+
+  it('includes a private co-attendee when the requester is also an active participant', async () => {
+    const rows = [
+      { session_id: SESSION_ID, user_id: USER_ID, status: 'going', joined_at: '2030-01-05T00:00:00Z' },
+      { session_id: SESSION_ID, user_id: 'user-2', status: 'waitlisted', joined_at: '2030-01-06T00:00:00Z' },
+    ];
+    const rsvpChain = arrayChain(rows);
+    const profileChain = arrayChain([
+      { id: USER_ID, display_name: 'Requesting User', privacy_level: 'public' },
+      { id: 'user-2', display_name: 'Private Player', privacy_level: 'private' },
+    ]);
+    mockFrom.mockReturnValueOnce(rsvpChain as any).mockReturnValueOnce(profileChain as any);
+
+    const rsvps = await getSessionRsvps(SESSION_ID, USER_ID);
+    expect(rsvps).toHaveLength(2);
+    expect(rsvps.find((r) => r.userId === 'user-2')).toMatchObject({ displayName: 'Private Player' });
+  });
+
+  it('includes a private attendee when the requester is the organizer', async () => {
+    const rows = [
+      { session_id: SESSION_ID, user_id: 'user-2', status: 'going', joined_at: '2030-01-05T00:00:00Z' },
+    ];
+    const rsvpChain = arrayChain(rows);
+    const profileChain = arrayChain([
+      { id: 'user-2', display_name: 'Private Player', privacy_level: 'private' },
+    ]);
+    mockFrom.mockReturnValueOnce(rsvpChain as any).mockReturnValueOnce(profileChain as any);
+
+    const rsvps = await getSessionRsvps(SESSION_ID, ORGANIZER_ID, ORGANIZER_ID);
+    expect(rsvps).toHaveLength(1);
+    expect(rsvps[0]).toMatchObject({ displayName: 'Private Player' });
+  });
+
+  it('still excludes a private attendee from a non-participant requester', async () => {
+    const rows = [
+      { session_id: SESSION_ID, user_id: 'user-2', status: 'going', joined_at: '2030-01-05T00:00:00Z' },
+    ];
+    const rsvpChain = arrayChain(rows);
+    const profileChain = arrayChain([
+      { id: 'user-2', display_name: 'Private Player', privacy_level: 'private' },
+    ]);
+    mockFrom.mockReturnValueOnce(rsvpChain as any).mockReturnValueOnce(profileChain as any);
+
+    const rsvps = await getSessionRsvps(SESSION_ID, 'some-outsider', ORGANIZER_ID);
+    expect(rsvps).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getSessionOrganizerName
+// ---------------------------------------------------------------------------
+
+describe('getSessionOrganizerName', () => {
+  it('returns the name directly when the organizer profile is public', async () => {
+    mockFrom.mockReturnValueOnce(
+      singleChain({ display_name: 'Jane Organizer', privacy_level: 'public' }) as any,
+    );
+
+    const name = await getSessionOrganizerName(SESSION_ID, ORGANIZER_ID, 'someone-else');
+    expect(name).toBe('Jane Organizer');
+  });
+
+  it('returns the name to the organizer themselves even when private', async () => {
+    mockFrom.mockReturnValueOnce(
+      singleChain({ display_name: 'Jane Organizer', privacy_level: 'private' }) as any,
+    );
+
+    const name = await getSessionOrganizerName(SESSION_ID, ORGANIZER_ID, ORGANIZER_ID);
+    expect(name).toBe('Jane Organizer');
+  });
+
+  it('returns the name to an active co-attendee when the organizer profile is private', async () => {
+    mockFrom
+      .mockReturnValueOnce(singleChain({ display_name: 'Jane Organizer', privacy_level: 'private' }) as any)
+      .mockReturnValueOnce(maybeSingleChain({ status: 'going' }) as any);
+
+    const name = await getSessionOrganizerName(SESSION_ID, ORGANIZER_ID, USER_ID);
+    expect(name).toBe('Jane Organizer');
+  });
+
+  it('returns null for a non-participant when the organizer profile is private', async () => {
+    mockFrom
+      .mockReturnValueOnce(singleChain({ display_name: 'Jane Organizer', privacy_level: 'private' }) as any)
+      .mockReturnValueOnce(maybeSingleChain(null) as any);
+
+    const name = await getSessionOrganizerName(SESSION_ID, ORGANIZER_ID, USER_ID);
+    expect(name).toBeNull();
+  });
+
+  it('returns null for an anonymous caller when the organizer profile is private', async () => {
+    mockFrom.mockReturnValueOnce(
+      singleChain({ display_name: 'Jane Organizer', privacy_level: 'private' }) as any,
+    );
+
+    const name = await getSessionOrganizerName(SESSION_ID, ORGANIZER_ID, undefined);
+    expect(name).toBeNull();
   });
 });
 

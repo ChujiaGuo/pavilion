@@ -78,10 +78,13 @@ export default function HomePage() {
         {isLoading ? (
           <p className="mt-3 text-neutral-500">Loading…</p>
         ) : nextSession ? (
-          <div className="mt-3 rounded-2xl border border-border p-5">
+          <Link
+            href={`/sessions/${nextSession.id}`}
+            className="mt-3 block rounded-2xl border border-border p-5 transition-shadow hover:shadow-md"
+          >
             <p className="text-lg font-semibold">{nextSession.venueName}</p>
             <p className="mt-1 text-neutral-600">{formatSessionTime(nextSession.startsAt)}</p>
-          </div>
+          </Link>
         ) : (
           <div className="mt-3 rounded-2xl border border-dashed border-border p-5">
             <p className="text-neutral-600">You don&apos;t have a session lined up yet.</p>
@@ -104,9 +107,11 @@ export default function HomePage() {
         ) : recentSessions.length > 0 ? (
           <ul className="mt-3 divide-y divide-border">
             {recentSessions.map((session) => (
-              <li key={session.id} className="py-3">
-                <p className="font-medium">{session.venueName}</p>
-                <p className="text-sm text-neutral-500">{formatSessionTime(session.startsAt)}</p>
+              <li key={session.id}>
+                <Link href={`/sessions/${session.id}`} className="block py-3">
+                  <p className="font-medium">{session.venueName}</p>
+                  <p className="text-sm text-neutral-500">{formatSessionTime(session.startsAt)}</p>
+                </Link>
               </li>
             ))}
           </ul>

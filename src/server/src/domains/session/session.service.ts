@@ -74,12 +74,13 @@ function toSession(row: SessionRow): Session {
   };
 }
 
-function toRsvp(row: RsvpRow): SessionRsvp {
+function toRsvp(row: RsvpRow, displayName: string | null = null): SessionRsvp {
   return {
     sessionId: row.session_id,
     userId: row.user_id,
     status: row.status as SessionRsvp['status'],
     joinedAt: row.joined_at,
+    displayName,
   };
 }
 
@@ -213,14 +214,19 @@ export async function listSessions(filters: SessionListFilters = {}): Promise<Se
 
   let query = supabase.from('sessions').select(SESSION_SELECT).eq('status', status);
 
-  // invite_only sessions are only visible to the organizer themselves.
-  // Any other caller — including unauthenticated requests and requests filtered by a
-  // third-party organizerId — only sees public sessions.
+  // invite_only sessions are only visible to the organizer themselves, or to
+  // an attendee looking at their own Attending list. Any other caller —
+  // including unauthenticated requests and requests filtered by a
+  // third-party organizerId/attendeeId — only sees public sessions.
   if (filters.organizerId) {
     query = query.eq('organizer_id', filters.organizerId);
     if (filters.requestingUserId !== filters.organizerId) {
       query = query.eq('visibility', 'public');
     }
+  } else if (filters.attendeeId && filters.requestingUserId === filters.attendeeId) {
+    // Owner viewing their own Attending list — an invite_only session they're
+    // validly attending should still show up there; only the public Browse
+    // listing needs to hide it (brainstorm.md's invite-only model).
   } else {
     query = query.eq('visibility', 'public');
   }
@@ -239,7 +245,11 @@ export async function listSessions(filters: SessionListFilters = {}): Promise<Se
   return (data as SessionRow[]).map(toSession);
 }
 
-export async function getSessionRsvps(sessionId: string): Promise<SessionRsvp[]> {
+export async function getSessionRsvps(
+  sessionId: string,
+  requestingUserId?: string,
+  organizerId?: string,
+): Promise<SessionRsvp[]> {
   const { data, error } = await supabase
     .from('session_rsvps')
     .select('session_id, user_id, status, joined_at')
@@ -254,16 +264,58 @@ export async function getSessionRsvps(sessionId: string): Promise<SessionRsvp[]>
   const userIds = rows.map((row) => row.user_id);
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, privacy_level')
+    .select('id, display_name, privacy_level')
     .in('id', userIds);
 
-  const publicUserIds = new Set(
-    (profiles ?? [])
-      .filter((p: { id: string; privacy_level: string }) => p.privacy_level !== 'private')
-      .map((p: { id: string; privacy_level: string }) => p.id),
+  const profileById = new Map(
+    (profiles ?? []).map((p: { id: string; display_name: string; privacy_level: string }) => [p.id, p]),
   );
 
-  return rows.filter((row) => publicUserIds.has(row.user_id)).map(toRsvp);
+  // A caller who shares this session — the organizer, or another active
+  // participant — can see every co-attendee's display name regardless of
+  // privacy_level (brainstorm.md's Privacy section: "only a player's
+  // name/display name is visible to anyone who's shared a session with
+  // them"). Anyone else (including anonymous browsers of a public session)
+  // still only sees attendees with a public profile.
+  const isParticipant =
+    requestingUserId != null &&
+    (requestingUserId === organizerId || rows.some((row) => row.user_id === requestingUserId));
+
+  return rows
+    .filter((row) => isParticipant || profileById.get(row.user_id)?.privacy_level !== 'private')
+    .map((row) => toRsvp(row, profileById.get(row.user_id)?.display_name ?? null));
+}
+
+export async function getSessionOrganizerName(
+  sessionId: string,
+  organizerId: string,
+  requestingUserId?: string,
+): Promise<string | null> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('display_name, privacy_level')
+    .eq('id', organizerId)
+    .single();
+
+  if (!profile) return null;
+  if (profile.privacy_level !== 'private' || requestingUserId === organizerId) {
+    return profile.display_name;
+  }
+
+  // Private organizer — only reveal the name to someone who shares this
+  // session with them (an active co-attendee), same carve-out as
+  // getSessionRsvps above. Anyone else gets null and the client falls back
+  // to a generic label.
+  if (!requestingUserId) return null;
+  const { data: rsvp } = await supabase
+    .from('session_rsvps')
+    .select('status')
+    .eq('session_id', sessionId)
+    .eq('user_id', requestingUserId)
+    .in('status', ['going', 'waitlisted', 'attended'])
+    .maybeSingle();
+
+  return rsvp ? profile.display_name : null;
 }
 
 export async function getMyRsvp(userId: string, sessionId: string): Promise<MyRsvpResult> {
@@ -343,11 +395,15 @@ export async function createSession(
   return { session: toSession(data as SessionRow), ...(warning ? { warning } : {}) };
 }
 
+export type UpdateSessionResult =
+  | { ok: true; session: Session }
+  | { ok: false; reason: 'not_found' | 'invalid_skill_range' };
+
 export async function updateSession(
   id: string,
   userId: string,
   fields: SessionUpdateFields,
-): Promise<Session | null> {
+): Promise<UpdateSessionResult> {
   const updates: Record<string, unknown> = {};
   if (fields.venueName !== undefined) updates.venue_name = fields.venueName;
   if (fields.format !== undefined) updates.format = fields.format;
@@ -363,6 +419,25 @@ export async function updateSession(
   if (fields.shuttleTubePrice !== undefined) updates.shuttle_tube_price = fields.shuttleTubePrice;
   if (fields.notes !== undefined) updates.notes = fields.notes;
 
+  // The skill_min < skill_max invariant can't be checked from the patch body
+  // alone when only one side is being updated (e.g. just skillMin) — fetch
+  // the current pair first so a partial update can't silently invert the
+  // range. This read also re-confirms organizer_id ownership early, though
+  // the final UPDATE's .eq() below is still the authoritative check.
+  if (fields.skillMin !== undefined || fields.skillMax !== undefined) {
+    const { data: current, error: fetchError } = await supabase
+      .from('sessions')
+      .select('skill_min, skill_max')
+      .eq('id', id)
+      .eq('organizer_id', userId)
+      .single();
+    if (fetchError || !current) return { ok: false, reason: 'not_found' };
+
+    const effectiveMin = fields.skillMin ?? Number(current.skill_min);
+    const effectiveMax = fields.skillMax ?? Number(current.skill_max);
+    if (effectiveMin >= effectiveMax) return { ok: false, reason: 'invalid_skill_range' };
+  }
+
   // Organizer check is folded into the UPDATE — 0-row result means not found or not organizer
   const { data, error } = await supabase
     .from('sessions')
@@ -372,8 +447,18 @@ export async function updateSession(
     .select(SESSION_SELECT)
     .single();
 
-  if (error || !data) return null;
-  return toSession(data as SessionRow);
+  if (error) {
+    // 23514 = check_violation — sessions_skill_range_valid catches what the
+    // pre-update read above can miss: two concurrent single-side patches can
+    // each pass validation against a stale read and still invert the range
+    // once both commit. The DB constraint is the actual atomic guard; the
+    // read above is just a fast-path that avoids the round trip in the
+    // common (non-racing) case.
+    if (error.code === '23514') return { ok: false, reason: 'invalid_skill_range' };
+    return { ok: false, reason: 'not_found' };
+  }
+  if (!data) return { ok: false, reason: 'not_found' };
+  return { ok: true, session: toSession(data as SessionRow) };
 }
 
 export async function cancelSession(id: string, userId: string): Promise<boolean> {

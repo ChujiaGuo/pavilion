@@ -76,6 +76,14 @@ supabase db push                # apply pending migrations to the linked prod pr
 
 Migrations live in `supabase/migrations/` and are committed to git. `db push` only runs migrations not yet applied to the remote — safe to run repeatedly.
 
+## Seeding local test data
+
+```bash
+npm run seed:sessions --workspace=server   # needs `supabase start` + src/server/.env.local, same as `dev`
+```
+
+Creates a login-ready test account (`testuser123@example.com` / `password`) plus six supporting mock users, and nine mock sessions spanning the full skill-rating scale (including the documented floor/ceiling boundaries — see `technical-notes.md`'s "Rating System") with the test user as host on some, attendee/waitlisted/attended on others. Venue names are all prefixed `[SEED]` for easy identification. Safe to re-run — it deletes and recreates everything it owns (matched by its fixed list of emails) rather than accumulating duplicates. See `src/server/src/scripts/seed-sessions.ts` for the exact spread.
+
 ## Testing
 
 ```bash
