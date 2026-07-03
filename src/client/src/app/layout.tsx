@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Nunito } from 'next/font/google';
 import { headers } from 'next/headers';
+import { Analytics } from '@vercel/analytics/next';
 import './globals.css';
 
 const nunito = Nunito({
@@ -30,7 +31,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en" className={nunito.variable}>
-      <body className="font-sans">{children}</body>
+      <body className="font-sans">
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }

@@ -160,7 +160,7 @@ site_url = "http://127.0.0.1:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000/**", "http://localhost:3000/**", "https://localhost:3000/**"]
+additional_redirect_urls = ["http://127.0.0.1:3000/**", "http://192.168.1.45:3000/**", "http://localhost:3000/**"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -397,11 +397,11 @@ allow_dynamic_registration = false
 # URL/Redirect URLs on every push (documented CLI gotcha: supabase/cli#3208, #3365). Uncomment
 # and fill in once a prod project exists, mirroring whatever's set in the Supabase dashboard
 # (Authentication → URL Configuration) so the two stay in sync.
-# [remotes.production]
-# project_id = "<prod-project-ref>"
-# [remotes.production.auth]
-# site_url = "https://<prod-domain>"
-# additional_redirect_urls = ["https://<prod-domain>/**"]
+[remotes.production]
+project_id = "cpmqcxrjiaveciawppnq"
+[remotes.production.auth]
+site_url = "https://pavilion.chujia.dev"
+additional_redirect_urls = ["https://pavilion.chujia.dev/**"]
 
 [edge_runtime]
 enabled = true

@@ -97,16 +97,18 @@ The integration suite runs the actual service code against a local Postgres inst
 
 ## Production setup (one-time)
 
+The server (`@pavilion/server`) deploys to Render; the client (`@pavilion/client`) deploys to Vercel. They're independent services with independent env vars and independent custom domains.
+
 1. Create a Supabase cloud project at supabase.com
 2. `supabase link --project-ref <your-project-ref>`
 3. `supabase db push` — applies all migrations to prod for the first time
-4. Add prod env vars to the Render dashboard (see `.env.example` files for the full list). For the server's `ALLOWED_ORIGINS`, use the prod frontend's actual domain(s) (e.g. `https://<prod-domain>`) — not `localhost`. Update this value any time a prod/staging frontend domain is added or removed; no code change or redeploy of the API's source is needed, just the env var.
-5. Connect the repo to Render — it auto-deploys on push to `main`
-6. In the Supabase dashboard (Authentication → URL Configuration), set **Site URL** to the prod domain and add `https://<prod-domain>/**` to **Redirect URLs** — needed for the Google OAuth callback and the `/forgot-password` reset-link flow to land on the right page instead of silently falling back to Site URL with an unusable `?code=`. `supabase/config.toml`'s `additional_redirect_urls` only governs local dev; this dashboard setting is prod's equivalent and must use the same `/**` wildcard suffix (see `technical-notes.md` "Auth" for why the wildcard specifically matters).
+4. **Render (server):** connect the repo, set Root Directory to `src`, Build Command to `npm install && npm run build --workspace=server`, Start Command to `npm run start --workspace=server`. Add prod env vars in the Render dashboard (see `src/server/.env.example` for the full list). `ALLOWED_ORIGINS` must be the prod client's actual domain(s) (e.g. `https://<prod-client-domain>`) — not `localhost`. Update this value any time a prod/staging frontend domain is added or removed; no code change or redeploy needed, just the env var. Render auto-deploys on push to `main`.
+5. **Vercel (client):** import the repo, set Root Directory to `src/client` (Vercel's npm-workspaces detection handles the monorepo install from there). Add prod env vars in the Vercel project's Environment Variables settings (see `src/client/.env.example`) — `NEXT_PUBLIC_API_URL` points at the Render server's URL (its default `*.onrender.com` URL, or a custom subdomain if you've given the server one). Vercel auto-deploys on push to `main`. Enable **Web Analytics** for the project (Vercel dashboard → Analytics tab) — the client already renders `<Analytics />` from `@vercel/analytics/next` in the root layout, so no further code change is needed once it's toggled on.
+6. In the Supabase dashboard (Authentication → URL Configuration), set **Site URL** to the prod client's domain and add `https://<prod-client-domain>/**` to **Redirect URLs** — needed for the Google OAuth callback and the `/forgot-password` reset-link flow to land on the right page instead of silently falling back to Site URL with an unusable `?code=`. `supabase/config.toml`'s `additional_redirect_urls` only governs local dev; this dashboard setting is prod's equivalent and must use the same `/**` wildcard suffix (see `technical-notes.md` "Auth" for why the wildcard specifically matters).
 7. Uncomment and fill in the `[remotes.production]` block near the end of `supabase/config.toml` with the project ref from step 2 and the same Site URL/Redirect URLs you set in step 6 — this is a safety pin, not a duplicate config path; see the inline comment above that block for why it's required before the next step.
-8. `supabase config push` — pushes `config.toml`'s `[auth]` section (including the tuned `[auth.rate_limit]` values, and `[auth.captcha]` if that's ever enabled) to the linked prod project. Safe to re-run any time `config.toml`'s auth settings change, as long as the `[remotes.production]` block from step 7 stays in sync with step 6's dashboard values — if you ever change Site URL/Redirect URLs in the dashboard, update `[remotes.production]` to match before pushing again, or `config push` will overwrite the dashboard values with whatever's in `config.toml`.
+8. `supabase config push` — pushes `config.toml`'s `[auth]` section (including the tuned `[auth.rate_limit]` values, and `[auth.captcha]` if that's ever enabled) to the linked prod project. Safe to re-run any time `config.toml`'s auth settings change, as long as the `[remotes.production]` block from step 7 stays in sync with step 6's dashboard values — if you ever change Site URL/Redirect URLs in the dashboard, update `[remotes.production]` to match before pushing again, or `config push` will overwrite the dashboard values with whatever's in `config.toml`. Also make sure `[auth.external.google] enabled` is back to `false` in the local file before pushing (see the comment above that block) — `config push` sends the whole `[auth]` section, including that local-only toggle.
 
-Prod env vars never go in files — hosting dashboard only.
+Prod env vars never go in files — each service's own hosting dashboard only (Render for the server, Vercel for the client).
 
 ## Stack
 
@@ -118,4 +120,4 @@ Prod env vars never go in files — hosting dashboard only.
 | Database + Auth | Supabase (PostgreSQL) |
 | Messaging | Stream Chat |
 | Payments | Stripe (deferred to v2 — see brainstorm.md Future Features Roadmap) |
-| Hosting | Render |
+| Hosting | Render (server) + Vercel (client) |
