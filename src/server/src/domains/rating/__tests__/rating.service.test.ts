@@ -15,6 +15,7 @@ import {
   fullDaysElapsed,
   submitOnboardingQuiz,
   skipOnboarding,
+  adminAdjustRating,
 } from '../rating.service.js';
 import { computeOnboardingScore } from '../rating.algorithm.js';
 
@@ -914,5 +915,141 @@ describe('onboarding quiz submission', () => {
 
       expect(result).toEqual({ ok: false, reason: 'already_completed' });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// adminAdjustRating
+// ---------------------------------------------------------------------------
+
+describe('adminAdjustRating', () => {
+  const CALLER_ID = 'caller-1';
+  const TARGET_ID = 'target-1';
+
+  it('returns forbidden when caller is below admin rank', async () => {
+    mockFrom.mockReturnValueOnce(singleChain({ role: 'moderator' })); // role check
+
+    const result = await adminAdjustRating(CALLER_ID, TARGET_ID, 5.0);
+    expect(result).toEqual({ ok: false, reason: 'forbidden' });
+  });
+
+  it('returns not_found when the target profile does not exist', async () => {
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'admin' })) // role check
+      .mockReturnValueOnce(singleChain(null)); // profile fetch fails
+
+    const result = await adminAdjustRating(CALLER_ID, TARGET_ID, 5.0);
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('clamps to rating_floor when the requested score is below it', async () => {
+    const updateChain = maybeSingleChain({ id: TARGET_ID });
+    const auditChain = okChain();
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'admin' }))
+      .mockReturnValueOnce(
+        singleChain({
+          internal_score: 5.0,
+          rating_floor: 6.0,
+          verified_tier: 8,
+          placement_sessions_remaining: 0,
+        }),
+      )
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(auditChain);
+
+    const result = await adminAdjustRating(CALLER_ID, TARGET_ID, 3.0);
+    expect(result.ok).toBe(true);
+    expect(updateChain['update']).toHaveBeenCalledWith({ internal_score: 6.0 });
+    expect(auditChain['insert']).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: TARGET_ID,
+        session_id: null,
+        performed_by: CALLER_ID,
+        score_before: 5.0,
+        score_after: 6.0,
+        delta: 1.0,
+      }),
+    );
+  });
+
+  it('clamps to the unverified ceiling when the target has no verified_tier', async () => {
+    const updateChain = maybeSingleChain({ id: TARGET_ID });
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'admin' }))
+      .mockReturnValueOnce(
+        singleChain({
+          internal_score: 5.0,
+          rating_floor: null,
+          verified_tier: null,
+          placement_sessions_remaining: 0,
+        }),
+      )
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(okChain());
+
+    await adminAdjustRating(CALLER_ID, TARGET_ID, 9.0);
+    expect(updateChain['update']).toHaveBeenCalledWith({ internal_score: 7.99 });
+  });
+
+  it('clamps to the absolute MIN_SCORE floor', async () => {
+    const updateChain = maybeSingleChain({ id: TARGET_ID });
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'admin' }))
+      .mockReturnValueOnce(
+        singleChain({
+          internal_score: 5.0,
+          rating_floor: null,
+          verified_tier: null,
+          placement_sessions_remaining: 0,
+        }),
+      )
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(okChain());
+
+    await adminAdjustRating(CALLER_ID, TARGET_ID, 0.2);
+    expect(updateChain['update']).toHaveBeenCalledWith({ internal_score: 1.0 });
+  });
+
+  it('logs and still reports success when the audit insert fails', async () => {
+    const updateChain = maybeSingleChain({ id: TARGET_ID });
+    const auditError = new Error('insert failed');
+    const failingAuditChain = makeChain();
+    failingAuditChain.resolveAs({ error: auditError });
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'admin' }))
+      .mockReturnValueOnce(
+        singleChain({
+          internal_score: 5.0,
+          rating_floor: null,
+          verified_tier: 8,
+          placement_sessions_remaining: 0,
+        }),
+      )
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(failingAuditChain);
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const result = await adminAdjustRating(CALLER_ID, TARGET_ID, 6.0);
+    expect(result.ok).toBe(true);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining(TARGET_ID), auditError);
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('returns concurrent_modification when the compare-and-swap affects zero rows', async () => {
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'admin' }))
+      .mockReturnValueOnce(
+        singleChain({
+          internal_score: 5.0,
+          rating_floor: null,
+          verified_tier: null,
+          placement_sessions_remaining: 0,
+        }),
+      )
+      .mockReturnValueOnce(maybeSingleChain(null)); // 0-row CAS result — score changed concurrently
+
+    const result = await adminAdjustRating(CALLER_ID, TARGET_ID, 5.5);
+    expect(result).toEqual({ ok: false, reason: 'concurrent_modification' });
   });
 });

@@ -24,7 +24,7 @@ A platform for organizing badminton get-togethers — venue discovery, skill-mat
     │   └── e2e/           # Playwright e2e specs — see "Testing" below
     └── server/            # @pavilion/server — Node/Hono backend (TypeScript)
         └── src/
-            ├── domains/    # user, venue, session, rating, messaging, marketplace — see technical-notes.md "Architecture" for responsibilities
+            ├── domains/    # user, venue, session, rating, admin, messaging, marketplace — see technical-notes.md "Architecture" for responsibilities
             └── __integration__/, test/  # Integration tests + fixtures against real Postgres — see "Testing" below
 ```
 
@@ -83,6 +83,12 @@ npm run seed:sessions --workspace=server   # needs `supabase start` + src/server
 ```
 
 Creates a login-ready test account (`testuser123@example.com` / `password`) plus six supporting mock users, and nine mock sessions spanning the full skill-rating scale (including the documented floor/ceiling boundaries — see `technical-notes.md`'s "Rating System") with the test user as host on some, attendee/waitlisted/attended on others. Venue names are all prefixed `[SEED]` for easy identification. Safe to re-run — it deletes and recreates everything it owns (matched by its fixed list of emails) rather than accumulating duplicates. See `src/server/src/scripts/seed-sessions.ts` for the exact spread.
+
+```bash
+npm run seed:admins --workspace=server     # same prerequisites as seed:sessions
+```
+
+Creates one account per admin role for manually testing `/admin` (see `technical-notes.md`'s "Admin & Roles"): `testvenue@example.test` (`venue_verifier`), `testmod@example.test` (`moderator`), `testadmin@example.test` (`admin`), `testowner@example.test` (`owner`) — all password `password`. Safe to re-run, same delete-and-recreate pattern as `seed:sessions`. See `src/server/src/scripts/seed-admins.ts`.
 
 ## Testing
 

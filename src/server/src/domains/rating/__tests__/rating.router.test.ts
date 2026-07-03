@@ -15,6 +15,7 @@ vi.mock('../rating.service.js', () => ({
   submitRating: vi.fn(),
   submitOnboardingQuiz: vi.fn(),
   skipOnboarding: vi.fn(),
+  adminAdjustRating: vi.fn(),
 }));
 
 import { supabase } from '../../../lib/supabase.js';
@@ -24,6 +25,7 @@ import {
   submitRating,
   submitOnboardingQuiz,
   skipOnboarding,
+  adminAdjustRating,
 } from '../rating.service.js';
 import { ratingRouter } from '../rating.router.js';
 
@@ -33,6 +35,7 @@ const mockGetRatingHistory = vi.mocked(getRatingHistory);
 const mockSubmitRating = vi.mocked(submitRating);
 const mockSubmitOnboardingQuiz = vi.mocked(submitOnboardingQuiz);
 const mockSkipOnboarding = vi.mocked(skipOnboarding);
+const mockAdminAdjustRating = vi.mocked(adminAdjustRating);
 
 const USER_ID = 'user-1';
 const SESSION_ID = 'session-1';
@@ -306,5 +309,62 @@ describe('POST /onboarding/skip', () => {
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ rating: RATING_DISPLAY });
     expect(mockSkipOnboarding).toHaveBeenCalledWith(USER_ID);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /user/:userId/adjust
+// ---------------------------------------------------------------------------
+
+describe('POST /user/:userId/adjust', () => {
+  it('returns 401 when no Authorization header is present', async () => {
+    const res = await ratingRouter.request(`/user/${RATEE_ID}/adjust`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newScore: 5.0 }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 400 when newScore is not a number', async () => {
+    const res = await ratingRouter.request(`/user/${RATEE_ID}/adjust`, {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newScore: 'high' }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockAdminAdjustRating).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the service reports forbidden', async () => {
+    mockAdminAdjustRating.mockResolvedValue({ ok: false, reason: 'forbidden' });
+    const res = await ratingRouter.request(`/user/${RATEE_ID}/adjust`, {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newScore: 5.0 }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 409 on concurrent_modification', async () => {
+    mockAdminAdjustRating.mockResolvedValue({ ok: false, reason: 'concurrent_modification' });
+    const res = await ratingRouter.request(`/user/${RATEE_ID}/adjust`, {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newScore: 5.0 }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it('returns the updated rating on success', async () => {
+    mockAdminAdjustRating.mockResolvedValue({ ok: true, rating: RATING_DISPLAY });
+    const res = await ratingRouter.request(`/user/${RATEE_ID}/adjust`, {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newScore: 5.0 }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ rating: RATING_DISPLAY });
+    expect(mockAdminAdjustRating).toHaveBeenCalledWith(USER_ID, RATEE_ID, 5.0);
   });
 });

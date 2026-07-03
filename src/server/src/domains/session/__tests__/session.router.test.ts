@@ -40,6 +40,15 @@ import {
 import { sessionRouter } from '../session.router.js';
 
 const mockGetUser = vi.mocked(supabase.auth.getUser);
+const mockFrom = vi.mocked(supabase.from);
+
+function singleChain(data: any) {
+  const chain: Record<string, any> = {};
+  chain['select'] = vi.fn(() => chain);
+  chain['eq'] = vi.fn(() => chain);
+  chain['single'] = vi.fn().mockResolvedValue({ data, error: data ? null : new Error('not found') });
+  return chain;
+}
 const mockGetSessionById = vi.mocked(getSessionById);
 const mockListSessions = vi.mocked(listSessions);
 const mockGetSessionRsvps = vi.mocked(getSessionRsvps);
@@ -202,6 +211,30 @@ describe('GET /', () => {
     );
     expect(mockListSessions).toHaveBeenCalledWith(
       expect.not.objectContaining({ requestingUserId: expect.anything() }),
+    );
+  });
+
+  it('returns 401 for admin=true without a Bearer token', async () => {
+    const res = await sessionRouter.request('/?admin=true');
+    expect(res.status).toBe(401);
+    expect(mockListSessions).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 for admin=true when the caller is below moderator rank', async () => {
+    mockFrom.mockReturnValueOnce(singleChain({ role: 'venue_verifier' }) as any); // admin-role check
+
+    const res = await sessionRouter.request('/?admin=true', { headers: withAuth() });
+    expect(res.status).toBe(403);
+    expect(mockListSessions).not.toHaveBeenCalled();
+  });
+
+  it('sets adminOverride for a moderator+ caller with admin=true', async () => {
+    mockFrom.mockReturnValueOnce(singleChain({ role: 'moderator' }) as any); // admin-role check
+    mockListSessions.mockResolvedValue([]);
+
+    await sessionRouter.request('/?admin=true&name=Rec', { headers: withAuth() });
+    expect(mockListSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ adminOverride: true, name: 'Rec' }),
     );
   });
 });

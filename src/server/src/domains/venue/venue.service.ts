@@ -1,5 +1,6 @@
 import { supabase } from '../../lib/supabase.js';
-import type { Venue, VenueHours } from '@pavilion/types';
+import { getAdminRole, roleAtLeast } from '../../lib/admin.js';
+import type { AdminHistoryFieldChange, Venue, VenueHours } from '@pavilion/types';
 
 type VenueRow = {
   id: string;
@@ -77,13 +78,37 @@ function toVenue(row: VenueRow): Venue {
   };
 }
 
+// venue_verifier is the lowest role in the hierarchy, so "has any admins row"
+// and "is venue_verifier or higher" are equivalent — this just routes that
+// check through the shared role-rank helper (lib/admin.ts) instead of a
+// second ad hoc admins-table query, so there's one source of truth for the
+// role hierarchy. No behavior change.
 async function isAdmin(userId: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('admins')
-    .select('user_id')
-    .eq('user_id', userId)
-    .single();
-  return !!data;
+  return roleAtLeast(await getAdminRole(userId), 'venue_verifier');
+}
+
+async function logVenueEdit(
+  venueId: string,
+  performedBy: string,
+  action: string,
+  changes: AdminHistoryFieldChange[] | null = null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('admin_venue_edits')
+    .insert({ venue_id: venueId, performed_by: performedBy, action, changes });
+  if (error) {
+    console.error(`logVenueEdit: audit insert failed for venue ${venueId} (${action})`, error);
+  }
+}
+
+// Only fields that are both present in the patch AND actually differ from
+// their prior value are diffed — an edit form resubmits every field on save
+// (not just the ones touched), so comparing presence alone would pad every
+// entry with no-op "X -> X" pairs for untouched fields.
+function buildVenueChanges(fields: VenueUpdateFields, before: Venue, after: Venue): AdminHistoryFieldChange[] {
+  return (Object.keys(fields) as (keyof VenueUpdateFields)[])
+    .filter((key) => fields[key] !== undefined && JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+    .map((key) => ({ field: key, before: before[key], after: after[key] }));
 }
 
 const VENUE_SELECT = '*, venue_hours(day_of_week, open_time, close_time)';
@@ -136,6 +161,9 @@ export async function createVenue(userId: string, fields: VenueCreateFields): Pr
     .single();
 
   if (error || !data) return null;
+
+  await logVenueEdit(data.id, userId, 'create');
+
   return toVenue(data as VenueRow);
 }
 
@@ -145,6 +173,15 @@ export async function updateVenue(
   fields: VenueUpdateFields,
 ): Promise<Venue | null> {
   const admin = await isAdmin(userId);
+
+  // Only fetched on the admin-override path — captures "before" values for
+  // the History diff. Skipped on the claimed-owner path, so an ordinary
+  // owner edit doesn't pay for an extra read.
+  let before: Venue | null = null;
+  if (admin) {
+    const { data: currentRow } = await supabase.from('venues').select(VENUE_SELECT).eq('id', id).single();
+    if (currentRow) before = toVenue(currentRow as VenueRow);
+  }
 
   const updates: Record<string, unknown> = {};
   if (fields.name !== undefined) updates.name = fields.name;
@@ -167,7 +204,13 @@ export async function updateVenue(
   const { data, error } = await query.select(VENUE_SELECT).single();
 
   if (error || !data) return null;
-  return toVenue(data as VenueRow);
+  const venue = toVenue(data as VenueRow);
+
+  if (admin) {
+    await logVenueEdit(id, userId, 'edit', before ? buildVenueChanges(fields, before, venue) : null);
+  }
+
+  return venue;
 }
 
 export async function claimVenue(id: string, userId: string): Promise<Venue | null> {

@@ -3,11 +3,14 @@ import { auth } from '../../middleware/auth.js';
 import {
   getUserRatingDisplay,
   getRatingHistory,
+  getRawScore,
   submitRating,
   submitOnboardingQuiz,
   skipOnboarding,
+  adminAdjustRating,
   type SubmitRatingResult,
   type OnboardingResult,
+  type AdminAdjustRatingResult,
 } from './rating.service.js';
 import type { OnboardingAnswers } from './rating.algorithm.js';
 import type { RelativeVote } from '@pavilion/types';
@@ -42,6 +45,16 @@ ratingRouter.get('/user/:userId', auth, async (c) => {
   const userId = c.req.param('userId');
   const rating = await getUserRatingDisplay(userId, c.get('userId'));
   if (!rating) return c.json({ error: 'Not found' }, 404);
+
+  // ?raw=true — admin+ only, used by the admin adjust-rating UI, which
+  // already lets an admin set the raw score directly and shouldn't have to
+  // work backward from the derived grade to know the current one.
+  if (c.req.query('raw') === 'true') {
+    const result = await getRawScore(c.get('userId'), userId);
+    if (!result.ok) return c.json({ error: result.reason }, result.reason === 'forbidden' ? 403 : 404);
+    return c.json({ userId, rating, rawScore: result.rawScore });
+  }
+
   return c.json({ userId, rating });
 });
 
@@ -80,4 +93,25 @@ ratingRouter.post('/onboarding/skip', auth, async (c) => {
     return c.json({ error: result.reason }, ONBOARDING_REASON_STATUS[result.reason]);
   }
   return c.json({ rating: result.rating }, 201);
+});
+
+const ADJUST_REASON_STATUS: Record<Extract<AdminAdjustRatingResult, { ok: false }>['reason'], 403 | 404 | 409> = {
+  forbidden: 403,
+  not_found: 404,
+  concurrent_modification: 409,
+};
+
+ratingRouter.post('/user/:userId/adjust', auth, async (c) => {
+  const body = await c.req.json();
+  const { newScore } = body as { newScore?: unknown };
+
+  if (typeof newScore !== 'number' || !Number.isFinite(newScore)) {
+    return c.json({ error: 'newScore must be a number' }, 400);
+  }
+
+  const result = await adminAdjustRating(c.get('userId'), c.req.param('userId'), newScore);
+  if (!result.ok) {
+    return c.json({ error: result.reason }, ADJUST_REASON_STATUS[result.reason]);
+  }
+  return c.json({ rating: result.rating, rawScore: result.rawScore });
 });

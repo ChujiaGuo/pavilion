@@ -61,7 +61,7 @@ const VENUE_ROW = {
   venue_hours: [{ day_of_week: 1, open_time: '09:00', close_time: '21:00' }],
 };
 
-const ADMIN_ROW = { user_id: 'admin-1' };
+const ADMIN_ROW = { user_id: 'admin-1', role: 'admin' };
 
 const CREATE_FIELDS = {
   name: 'Badminton Hub',
@@ -197,7 +197,9 @@ describe('createVenue', () => {
     adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
     const venueChain = makeChain();
     venueChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
-    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(venueChain);
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(venueChain).mockReturnValueOnce(auditChain);
 
     await createVenue('admin-1', CREATE_FIELDS);
     expect(venueChain['insert']).toHaveBeenCalledWith(
@@ -217,7 +219,9 @@ describe('createVenue', () => {
     adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
     const venueChain = makeChain();
     venueChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
-    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(venueChain);
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(venueChain).mockReturnValueOnce(auditChain);
 
     await createVenue('admin-1', CREATE_FIELDS);
     expect(venueChain['insert']).toHaveBeenCalledWith(
@@ -230,7 +234,9 @@ describe('createVenue', () => {
     adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
     const venueChain = makeChain();
     venueChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
-    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(venueChain);
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(venueChain).mockReturnValueOnce(auditChain);
 
     const venue = await createVenue('admin-1', CREATE_FIELDS);
     expect(venue).toMatchObject({ id: 'venue-1', name: 'Badminton Hub' });
@@ -244,6 +250,24 @@ describe('createVenue', () => {
     mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(venueChain);
 
     expect(await createVenue('admin-1', CREATE_FIELDS)).toBeNull();
+  });
+
+  it('always writes an admin_venue_edits audit row on success (venue_verifier+ is required to create at all)', async () => {
+    const adminChain = makeChain();
+    adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const venueChain = makeChain();
+    venueChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(venueChain).mockReturnValueOnce(auditChain);
+
+    await createVenue('admin-1', CREATE_FIELDS);
+    expect(auditChain['insert']).toHaveBeenCalledWith({
+      venue_id: 'venue-1',
+      performed_by: 'admin-1',
+      action: 'create',
+      changes: null,
+    });
   });
 });
 
@@ -278,22 +302,99 @@ describe('updateVenue', () => {
   it('allows update when user is an admin and skips the claimed_by check', async () => {
     const adminChain = makeChain();
     adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null }); // is admin
+    const beforeChain = makeChain();
+    beforeChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const updateChain = makeChain();
+    updateChain['single'].mockResolvedValue({ data: { ...VENUE_ROW, name: 'New Name' }, error: null });
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom
+      .mockReturnValueOnce(adminChain)
+      .mockReturnValueOnce(beforeChain)
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(auditChain);
+
+    expect(await updateVenue('venue-1', 'admin-1', { name: 'New Name' })).not.toBeNull();
+    expect(mockFrom).toHaveBeenCalledTimes(4); // admins check + before-fetch + update + audit insert
+    expect(updateChain['eq']).toHaveBeenCalledWith('id', 'venue-1');
+    expect(updateChain['eq']).not.toHaveBeenCalledWith('claimed_by_account_id', expect.anything());
+  });
+
+  it('writes an admin_venue_edits audit row when an admin (not claimed owner) edits a venue', async () => {
+    const adminChain = makeChain();
+    adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const beforeChain = makeChain();
+    beforeChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null }); // name: 'Badminton Hub'
+    const updateChain = makeChain();
+    updateChain['single'].mockResolvedValue({ data: { ...VENUE_ROW, name: 'New Name' }, error: null });
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom
+      .mockReturnValueOnce(adminChain)
+      .mockReturnValueOnce(beforeChain)
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(auditChain);
+
+    await updateVenue('venue-1', 'admin-1', { name: 'New Name' });
+    expect(auditChain['insert']).toHaveBeenCalledWith({
+      venue_id: 'venue-1',
+      performed_by: 'admin-1',
+      action: 'edit',
+      changes: [{ field: 'name', before: 'Badminton Hub', after: 'New Name' }],
+    });
+  });
+
+  it('excludes patched fields that resolve to the same value from the audit diff', async () => {
+    const adminChain = makeChain();
+    adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const beforeChain = makeChain();
+    beforeChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null }); // city: 'Vancouver'
+    const updateChain = makeChain();
+    updateChain['single'].mockResolvedValue({ data: { ...VENUE_ROW, name: 'New Name' }, error: null });
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom
+      .mockReturnValueOnce(adminChain)
+      .mockReturnValueOnce(beforeChain)
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(auditChain);
+
+    // city is re-sent with its existing value alongside the real change to name.
+    await updateVenue('venue-1', 'admin-1', { name: 'New Name', city: VENUE_ROW.city });
+    expect(auditChain['insert']).toHaveBeenCalledWith({
+      venue_id: 'venue-1',
+      performed_by: 'admin-1',
+      action: 'edit',
+      changes: [{ field: 'name', before: 'Badminton Hub', after: 'New Name' }],
+    });
+  });
+
+  it('does not write an audit row when a claimed owner (non-admin) edits their own venue', async () => {
+    const adminChain = makeChain();
+    adminChain['single'].mockResolvedValue({ data: null, error: null }); // not admin
     const updateChain = makeChain();
     updateChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
     mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(updateChain);
 
-    expect(await updateVenue('venue-1', 'admin-1', { name: 'New Name' })).not.toBeNull();
-    expect(mockFrom).toHaveBeenCalledTimes(2); // admins check + update only
-    expect(updateChain['eq']).toHaveBeenCalledWith('id', 'venue-1');
-    expect(updateChain['eq']).not.toHaveBeenCalledWith('claimed_by_account_id', expect.anything());
+    await updateVenue('venue-1', 'user-1', { name: 'New Name' });
+    // admins check + update only — no before-fetch, no admin_venue_edits insert.
+    expect(mockFrom).toHaveBeenCalledTimes(2);
   });
 
   it('only sends provided fields in the update payload', async () => {
     const adminChain = makeChain();
     adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const beforeChain = makeChain();
+    beforeChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
     const updateChain = makeChain();
     updateChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
-    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(updateChain);
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom
+      .mockReturnValueOnce(adminChain)
+      .mockReturnValueOnce(beforeChain)
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(auditChain);
 
     await updateVenue('venue-1', 'admin-1', { name: 'New Name' });
 
@@ -304,9 +405,11 @@ describe('updateVenue', () => {
   it('returns null on DB update error', async () => {
     const adminChain = makeChain();
     adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const beforeChain = makeChain();
+    beforeChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
     const updateChain = makeChain();
     updateChain['single'].mockResolvedValue({ data: null, error: new Error('update failed') });
-    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(updateChain);
+    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(beforeChain).mockReturnValueOnce(updateChain);
 
     expect(await updateVenue('venue-1', 'admin-1', { name: 'New Name' })).toBeNull();
   });

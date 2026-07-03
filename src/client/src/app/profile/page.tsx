@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useRequireAuth } from '@/lib/hooks/use-require-auth';
 import { apiGet, apiPatch } from '@/lib/api';
 import { AppShell } from '@/components/nav/app-shell';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -23,7 +23,8 @@ import { BadgeCheck, LogOut, Star } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 import { US_STATES, type UsState } from '@/lib/us-states';
-import type { PlayFormat, PlayStyle, PrivacyLevel, RatingDisplay, User } from '@pavilion/types';
+import Link from 'next/link';
+import type { AdminRole, PlayFormat, PlayStyle, PrivacyLevel, RatingDisplay, User } from '@pavilion/types';
 
 function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
@@ -86,6 +87,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [rating, setRating] = useState<RatingDisplay | null>(null);
+  const [adminRole, setAdminRole] = useState<AdminRole | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -110,6 +112,13 @@ export default function ProfilePage() {
       } finally {
         setIsLoading(false);
       }
+
+      // Separate from the Promise.all above — the admin-menu link is
+      // non-critical UI, so a failure here shouldn't affect the loading
+      // state of the rest of the page.
+      apiGet<{ role: AdminRole | null }>('/api/admin/me', accessToken)
+        .then((res) => setAdminRole(res.role))
+        .catch(() => setAdminRole(null));
     }
 
     load();
@@ -447,6 +456,11 @@ export default function ProfilePage() {
             <Button type="button" variant="outline" onClick={startEditing}>
               Edit profile
             </Button>
+            {adminRole != null && (
+              <Link href="/admin" className={buttonVariants({ variant: 'outline' })}>
+                Admin
+              </Link>
+            )}
             <Button
               type="button"
               variant="destructive"

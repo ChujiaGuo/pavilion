@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase.js';
+import { getAdminRole, roleAtLeast } from '../../lib/admin.js';
 import type { RatingDisplay, RatingHistory, RelativeVote } from '@pavilion/types';
 import {
   computeRatingUpdate,
@@ -6,6 +7,8 @@ import {
   computeOnboardingScore,
   SKIP_DEFAULT_SCORE,
   ANOMALY_CALIBRATION_THRESHOLD,
+  MIN_SCORE,
+  UNVERIFIED_CEILING,
   type TierProtectionAction,
   type OnboardingAnswers,
 } from './rating.algorithm.js';
@@ -68,6 +71,30 @@ export async function getUserRatingDisplay(userId: string, requesterId: string):
   if (error || !data) return null;
   if (data.privacy_level === 'private' && userId !== requesterId) return null;
   return toRatingDisplay(data.internal_score, data.placement_sessions_remaining, data.verified_tier);
+}
+
+export type GetRawScoreResult =
+  | { ok: true; rawScore: number }
+  | { ok: false; reason: 'forbidden' | 'not_found' };
+
+// Admin+ only — the raw internal_score is otherwise never exposed to the
+// client (see technical-notes.md "Rating display derivation"). This exists
+// specifically for the admin adjust-rating UI, which already lets an admin
+// set the raw score directly, so showing only the derived grade there would
+// be inconsistent with what the same form writes.
+export async function getRawScore(callerId: string, targetUserId: string): Promise<GetRawScoreResult> {
+  const callerRole = await getAdminRole(callerId);
+  if (!roleAtLeast(callerRole, 'admin')) return { ok: false, reason: 'forbidden' };
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('internal_score')
+    .eq('id', targetUserId)
+    .is('deleted_at', null)
+    .single();
+
+  if (error || !data) return { ok: false, reason: 'not_found' };
+  return { ok: true, rawScore: Number(data.internal_score) };
 }
 
 export async function getRatingHistory(userId: string): Promise<RatingHistory[]> {
@@ -357,4 +384,78 @@ export async function submitOnboardingQuiz(userId: string, answers: OnboardingAn
 
 export async function skipOnboarding(userId: string): Promise<OnboardingResult> {
   return completeOnboarding(userId, SKIP_DEFAULT_SCORE, { answers: null, skipped: true });
+}
+
+// ---------------------------------------------------------------------------
+// Admin manual rating adjustment
+// ---------------------------------------------------------------------------
+
+export type AdminAdjustRatingResult =
+  | { ok: true; rating: RatingDisplay; rawScore: number }
+  | { ok: false; reason: 'forbidden' | 'not_found' | 'concurrent_modification' };
+
+/**
+ * Admin+ only. Clamps newScore with the same rules the live scoring
+ * algorithm applies (rating_floor, unverified ceiling, absolute floor), then
+ * writes it with an optimistic compare-and-swap on the score just read —
+ * a plain read-then-write here could silently clobber a peer-rating vote
+ * (submitRating) that commits in the gap between the read and the write.
+ * A 0-row CAS result means the score changed concurrently; the caller should
+ * retry rather than having this silently overwrite the newer value.
+ */
+export async function adminAdjustRating(
+  callerId: string,
+  targetUserId: string,
+  newScore: number,
+): Promise<AdminAdjustRatingResult> {
+  const callerRole = await getAdminRole(callerId);
+  if (!roleAtLeast(callerRole, 'admin')) return { ok: false, reason: 'forbidden' };
+
+  const { data: profile, error: fetchError } = await supabase
+    .from('profiles')
+    .select('internal_score, rating_floor, verified_tier, placement_sessions_remaining')
+    .eq('id', targetUserId)
+    .is('deleted_at', null)
+    .single();
+
+  if (fetchError || !profile) return { ok: false, reason: 'not_found' };
+
+  const scoreBefore = Number(profile.internal_score);
+  const ratingFloor = profile.rating_floor as number | null;
+  const verifiedTier = profile.verified_tier as number | null;
+
+  let clamped = newScore;
+  if (ratingFloor !== null) clamped = Math.max(clamped, ratingFloor);
+  if (verifiedTier === null) clamped = Math.min(clamped, UNVERIFIED_CEILING);
+  clamped = Math.max(clamped, MIN_SCORE);
+  clamped = Math.round(clamped * 100) / 100;
+
+  const { data: updated, error: updateError } = await supabase
+    .from('profiles')
+    .update({ internal_score: clamped })
+    .eq('id', targetUserId)
+    .eq('internal_score', profile.internal_score)
+    .select('id')
+    .maybeSingle();
+
+  if (updateError) return { ok: false, reason: 'not_found' };
+  if (!updated) return { ok: false, reason: 'concurrent_modification' };
+
+  const { error: auditError } = await supabase.from('rating_history').insert({
+    user_id: targetUserId,
+    session_id: null,
+    performed_by: callerId,
+    score_before: scoreBefore,
+    score_after: clamped,
+    delta: clamped - scoreBefore,
+  });
+  if (auditError) {
+    console.error(`adminAdjustRating: audit insert failed for user ${targetUserId}`, auditError);
+  }
+
+  return {
+    ok: true,
+    rating: toRatingDisplay(clamped, profile.placement_sessions_remaining as number, verifiedTier),
+    rawScore: clamped,
+  };
 }

@@ -1,5 +1,7 @@
 import { supabase } from '../../lib/supabase.js';
+import { getAdminRole, roleAtLeast } from '../../lib/admin.js';
 import type {
+  AdminHistoryFieldChange,
   Session,
   SessionRsvp,
   SessionType,
@@ -137,7 +139,14 @@ export type SessionListFilters = {
   region?: string;
   skillMin?: number;
   skillMax?: number;
+  // Moderator+ admin search — bypasses every visibility/ownership rule below.
+  // The router only sets this after confirming requestingUserId is
+  // moderator+ (see session.router.ts's GET / `admin=true` handling), so
+  // listSessions trusts it rather than re-checking role itself.
+  adminOverride?: boolean;
 };
+
+const ADMIN_SEARCH_LIMIT = 50;
 
 export type JoinResult =
   | { ok: true; status: 'going' | 'waitlisted'; warning?: 'playing_up' | 'playing_down' }
@@ -170,6 +179,52 @@ export async function getSessionById(id: string): Promise<Session | null> {
 
 export async function listSessions(filters: SessionListFilters = {}): Promise<Session[]> {
   const status = filters.status ?? 'upcoming';
+
+  // Admin search (moderator+) — a separate branch rather than threading a
+  // flag through every visibility-gating case below, since it genuinely
+  // ignores all of them (public/invite_only, organizer/attendee ownership,
+  // private-profile checks) rather than adjusting any single one. Capped at
+  // ADMIN_SEARCH_LIMIT — an admin search has no pagination UI in v1, so an
+  // unfiltered query narrows via the filters supplied, not via paging.
+  if (filters.adminOverride) {
+    let query = supabase.from('sessions').select(SESSION_SELECT).eq('status', status);
+
+    if (filters.id) query = query.eq('id', filters.id);
+    if (filters.venueId) query = query.eq('venue_id', filters.venueId);
+    if (filters.organizerId) query = query.eq('organizer_id', filters.organizerId);
+    if (filters.name) query = query.ilike('venue_name', `%${filters.name}%`);
+    if (filters.dateFrom) query = query.gte('starts_at', filters.dateFrom);
+    if (filters.dateTo) query = query.lte('starts_at', filters.dateTo);
+    if (filters.skillMin !== undefined) query = query.gte('skill_max', filters.skillMin);
+    if (filters.skillMax !== undefined) query = query.lte('skill_min', filters.skillMax);
+
+    if (filters.city || filters.region) {
+      let venueQuery = supabase.from('venues').select('id');
+      if (filters.city) venueQuery = venueQuery.eq('city', filters.city);
+      if (filters.region) venueQuery = venueQuery.eq('region', filters.region);
+      const { data: venueData } = await venueQuery;
+      const cityVenueIds = (venueData ?? []).map((v: { id: string }) => v.id);
+      if (cityVenueIds.length === 0) return [];
+      query = query.in('venue_id', cityVenueIds);
+    }
+
+    if (filters.attendeeId) {
+      const { data: rsvpData } = await supabase
+        .from('session_rsvps')
+        .select('session_id')
+        .eq('user_id', filters.attendeeId)
+        .in('status', ['going', 'waitlisted', 'attended']);
+      const attendeeSessionIds = (rsvpData ?? []).map((r: { session_id: string }) => r.session_id);
+      if (attendeeSessionIds.length === 0) return [];
+      query = query.in('id', attendeeSessionIds);
+    }
+
+    query = query.order('starts_at', { ascending: false }).limit(ADMIN_SEARCH_LIMIT);
+
+    const { data, error } = await query;
+    if (error || !data) return [];
+    return (data as SessionRow[]).map(toSession);
+  }
 
   // Exact-id search bypasses the public-only visibility filter below (the
   // caller already has the specific session — e.g. from a shared link) but
@@ -419,11 +474,37 @@ export type UpdateSessionResult =
   | { ok: true; session: Session }
   | { ok: false; reason: 'not_found' | 'invalid_skill_range' };
 
+// Only fields that are both present in the patch AND actually differ from
+// their prior value are diffed — the admin edit form resubmits every field
+// on save (not just the ones the admin touched), so comparing presence alone
+// would pad every entry with no-op "X -> X" pairs for untouched fields.
+function buildSessionChanges(
+  fields: SessionUpdateFields,
+  before: Session,
+  after: Session,
+): AdminHistoryFieldChange[] {
+  return (Object.keys(fields) as (keyof SessionUpdateFields)[])
+    .filter((key) => fields[key] !== undefined && JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+    .map((key) => ({ field: key, before: before[key], after: after[key] }));
+}
+
 export async function updateSession(
   id: string,
   userId: string,
   fields: SessionUpdateFields,
 ): Promise<UpdateSessionResult> {
+  const isModerator = roleAtLeast(await getAdminRole(userId), 'moderator');
+
+  // Only fetched on the moderator-override path — captures "before" values
+  // for the History diff, and doubles as the skill-pair source below so a
+  // moderator edit that also patches skillMin/skillMax never issues two
+  // separate pre-fetches for the same row.
+  let before: Session | null = null;
+  if (isModerator) {
+    const { data: currentRow } = await supabase.from('sessions').select(SESSION_SELECT).eq('id', id).single();
+    if (currentRow) before = toSession(currentRow as SessionRow);
+  }
+
   const updates: Record<string, unknown> = {};
   if (fields.venueName !== undefined) updates.venue_name = fields.venueName;
   if (fields.format !== undefined) updates.format = fields.format;
@@ -442,30 +523,36 @@ export async function updateSession(
   // The skill_min < skill_max invariant can't be checked from the patch body
   // alone when only one side is being updated (e.g. just skillMin) — fetch
   // the current pair first so a partial update can't silently invert the
-  // range. This read also re-confirms organizer_id ownership early, though
-  // the final UPDATE's .eq() below is still the authoritative check.
+  // range. `before` (fetched above) already has it on the moderator path;
+  // the organizer path still needs its own fetch, which also re-confirms
+  // organizer_id ownership early, though the final UPDATE's .eq() below is
+  // still the authoritative check.
   if (fields.skillMin !== undefined || fields.skillMax !== undefined) {
-    const { data: current, error: fetchError } = await supabase
-      .from('sessions')
-      .select('skill_min, skill_max')
-      .eq('id', id)
-      .eq('organizer_id', userId)
-      .single();
-    if (fetchError || !current) return { ok: false, reason: 'not_found' };
+    let effectiveMin: number;
+    let effectiveMax: number;
 
-    const effectiveMin = fields.skillMin ?? Number(current.skill_min);
-    const effectiveMax = fields.skillMax ?? Number(current.skill_max);
+    if (before) {
+      effectiveMin = fields.skillMin ?? before.skillMin;
+      effectiveMax = fields.skillMax ?? before.skillMax;
+    } else {
+      let currentQuery = supabase.from('sessions').select('skill_min, skill_max').eq('id', id);
+      if (!isModerator) currentQuery = currentQuery.eq('organizer_id', userId);
+      const { data: current, error: fetchError } = await currentQuery.single();
+      if (fetchError || !current) return { ok: false, reason: 'not_found' };
+      effectiveMin = fields.skillMin ?? Number(current.skill_min);
+      effectiveMax = fields.skillMax ?? Number(current.skill_max);
+    }
+
     if (effectiveMin >= effectiveMax) return { ok: false, reason: 'invalid_skill_range' };
   }
 
-  // Organizer check is folded into the UPDATE — 0-row result means not found or not organizer
-  const { data, error } = await supabase
-    .from('sessions')
-    .update(updates)
-    .eq('id', id)
-    .eq('organizer_id', userId)
-    .select(SESSION_SELECT)
-    .single();
+  // Organizer check is folded into the UPDATE — 0-row result means not found
+  // or not organizer. A moderator+ caller skips this check entirely (full
+  // organizer parity for moderation), same shape as venue.service.ts's
+  // updateVenue admin/claimed-owner branch.
+  let updateQuery = supabase.from('sessions').update(updates).eq('id', id);
+  if (!isModerator) updateQuery = updateQuery.eq('organizer_id', userId);
+  const { data, error } = await updateQuery.select(SESSION_SELECT).single();
 
   if (error) {
     // 23514 = check_violation — sessions_skill_range_valid catches what the
@@ -478,20 +565,46 @@ export async function updateSession(
     return { ok: false, reason: 'not_found' };
   }
   if (!data) return { ok: false, reason: 'not_found' };
-  return { ok: true, session: toSession(data as SessionRow) };
+  const session = toSession(data as SessionRow);
+
+  if (isModerator) {
+    await logSessionEdit(id, userId, 'edit', before ? buildSessionChanges(fields, before, session) : null);
+  }
+
+  return { ok: true, session };
+}
+
+async function logSessionEdit(
+  sessionId: string,
+  performedBy: string,
+  action: string,
+  changes: AdminHistoryFieldChange[] | null = null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('admin_session_edits')
+    .insert({ session_id: sessionId, performed_by: performedBy, action, changes });
+  if (error) {
+    console.error(`logSessionEdit: audit insert failed for session ${sessionId} (${action})`, error);
+  }
 }
 
 export async function cancelSession(id: string, userId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('sessions')
-    .update({ status: 'cancelled' })
-    .eq('id', id)
-    .eq('organizer_id', userId)
-    .eq('status', 'upcoming')
-    .select('id');
+  const isModerator = roleAtLeast(await getAdminRole(userId), 'moderator');
+
+  let query = supabase.from('sessions').update({ status: 'cancelled' }).eq('id', id);
+  if (!isModerator) query = query.eq('organizer_id', userId);
+  query = query.eq('status', 'upcoming');
+
+  const { data, error } = await query.select('id');
 
   // A zero-row update returns no error — explicitly check that a row was matched.
-  return !error && Array.isArray(data) && data.length > 0;
+  const success = !error && Array.isArray(data) && data.length > 0;
+
+  if (success && isModerator) {
+    await logSessionEdit(id, userId, 'cancel', [{ field: 'status', before: 'upcoming', after: 'cancelled' }]);
+  }
+
+  return success;
 }
 
 export type ProgressStatusResult =
@@ -514,7 +627,8 @@ export async function progressSessionStatus(
     .single();
 
   if (fetchError || !existing) return { ok: false, reason: 'not_found' };
-  if (existing.organizer_id !== userId) return { ok: false, reason: 'forbidden' };
+  const isModerator = roleAtLeast(await getAdminRole(userId), 'moderator');
+  if (!isModerator && existing.organizer_id !== userId) return { ok: false, reason: 'forbidden' };
 
   const nextStatus = VALID_TRANSITIONS[existing.status as SessionStatus];
   if (!nextStatus) return { ok: false, reason: 'invalid_transition' };
@@ -528,6 +642,13 @@ export async function progressSessionStatus(
     .single();
 
   if (error || !data) return { ok: false, reason: 'not_found' };
+
+  if (isModerator) {
+    await logSessionEdit(id, userId, 'advance_status', [
+      { field: 'status', before: existing.status, after: nextStatus },
+    ]);
+  }
+
   return { ok: true, session: toSession(data as SessionRow) };
 }
 
@@ -549,7 +670,8 @@ export async function markAttendance(
     .single();
 
   if (sessionError || !session) return { ok: false, reason: 'not_found' };
-  if (session.organizer_id !== organizerId) return { ok: false, reason: 'forbidden' };
+  const isModerator = roleAtLeast(await getAdminRole(organizerId), 'moderator');
+  if (!isModerator && session.organizer_id !== organizerId) return { ok: false, reason: 'forbidden' };
   if (session.status !== 'completed') return { ok: false, reason: 'not_completed' };
 
   // Only process RSVPs still in 'going' state — re-calls are safely ignored
@@ -599,6 +721,13 @@ export async function markAttendance(
       });
       if (decrementError) return { ok: false, reason: 'write_failed' };
     }
+  }
+
+  if (isModerator) {
+    await logSessionEdit(sessionId, organizerId, 'mark_attendance', [
+      { field: 'attended', before: null, after: actualConfirmedIds.length },
+      { field: 'noShows', before: null, after: actualNoShowIds.length },
+    ]);
   }
 
   return { ok: true, attended: actualConfirmedIds.length, noShows: actualNoShowIds.length };

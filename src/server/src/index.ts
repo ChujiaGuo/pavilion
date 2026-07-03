@@ -9,6 +9,7 @@ import { sessionRouter } from './domains/session/session.router.js';
 import { userRouter } from './domains/user/user.router.js';
 import { ratingRouter } from './domains/rating/rating.router.js';
 import { messagingRouter } from './domains/messaging/messaging.router.js';
+import { adminRouter } from './domains/admin/admin.router.js';
 
 const app = new Hono();
 
@@ -37,6 +38,7 @@ app.route('/api/sessions', sessionRouter);
 app.route('/api/users', userRouter);
 app.route('/api/ratings', ratingRouter);
 app.route('/api/messaging', messagingRouter);
+app.route('/api/admin', adminRouter);
 
 const PORT = Number(process.env.PORT) || 4000;
 

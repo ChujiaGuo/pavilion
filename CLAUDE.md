@@ -62,7 +62,7 @@ See [README.md](README.md) "Database migrations" for the full migration workflow
 
 **Domain boundaries — no cross-domain imports.** See technical-notes.md "Architecture" for the full domain-responsibility table (the single canonical copy — don't duplicate it here).
 
-Each domain under `src/server/src/domains/<name>/` follows `<name>.router.ts` (Hono routes, owns the `auth` middleware and request/response shape) + `<name>.service.ts` (Supabase queries, row↔domain-type mapping, business rules), with tests in `__tests__/`. `user`, `venue`, `session`, and `rating` are implemented; `messaging` is still a router-only stub awaiting implementation — follow the same router/service split when filling it in. See technical-notes.md "Database Logic" for the specific not-yet-built pieces within implemented domains.
+Each domain under `src/server/src/domains/<name>/` follows `<name>.router.ts` (Hono routes, owns the `auth` middleware and request/response shape) + `<name>.service.ts` (Supabase queries, row↔domain-type mapping, business rules), with tests in `__tests__/`. `user`, `venue`, `session`, `rating`, and `admin` are implemented; `messaging` is still a router-only stub awaiting implementation — follow the same router/service split when filling it in. See technical-notes.md "Database Logic" for the specific not-yet-built pieces within implemented domains, and "Admin & Roles" for the role hierarchy and per-domain admin-override pattern every other domain follows for its own admin-gated actions.
 
 **Row mapping convention:** services define a private `*Row` type matching the snake_case DB columns, and a `to<Type>()` function that maps it to the camelCase type exported from `@pavilion/types`. Routers never see raw DB rows.
 

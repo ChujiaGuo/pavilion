@@ -37,6 +37,7 @@ function makeChain() {
   chain['lt'] = vi.fn(() => chain);
   chain['gte'] = vi.fn(() => chain);
   chain['lte'] = vi.fn(() => chain);
+  chain['ilike'] = vi.fn(() => chain);
   chain['order'] = vi.fn(() => chain);
   chain['limit'] = vi.fn(() => chain);
   chain['is'] = vi.fn(() => chain);
@@ -294,6 +295,42 @@ describe('listSessions', () => {
     const sessions = await listSessions({ attendeeId: USER_ID, requestingUserId: USER_ID });
     expect(sessions).toHaveLength(1);
   });
+
+  describe('adminOverride (moderator+ search)', () => {
+    it('bypasses visibility filters entirely and caps results at 50', async () => {
+      const chain = makeChain();
+      mockFrom.mockReturnValue(chain as any);
+      chain.resolveAs({ data: [BASE_SESSION_ROW], error: null });
+
+      const sessions = await listSessions({ adminOverride: true, status: 'upcoming' });
+      expect(sessions).toHaveLength(1);
+      expect(chain['limit']).toHaveBeenCalledWith(50);
+      // No visibility/ownership eq() calls — only the status filter.
+      const eqCalls = (chain['eq'] as ReturnType<typeof vi.fn>).mock.calls;
+      expect(eqCalls.some((args: any[]) => args[0] === 'visibility')).toBe(false);
+    });
+
+    it('applies the name filter under adminOverride', async () => {
+      const chain = makeChain();
+      mockFrom.mockReturnValue(chain as any);
+      chain.resolveAs({ data: [], error: null });
+
+      await listSessions({ adminOverride: true, name: 'Rec Center' });
+      expect(chain['ilike']).toHaveBeenCalledWith('venue_name', '%Rec Center%');
+    });
+
+    it('resolves attendeeId to session ids without a privacy check under adminOverride', async () => {
+      const rsvpChain = arrayChain([{ session_id: SESSION_ID }]);
+      const sessionChain = makeChain();
+      sessionChain.resolveAs({ data: [BASE_SESSION_ROW], error: null });
+      mockFrom.mockReturnValueOnce(rsvpChain as any).mockReturnValueOnce(sessionChain as any);
+
+      const sessions = await listSessions({ adminOverride: true, attendeeId: 'private-user' });
+      // Only 2 from() calls (rsvps, sessions) — no profiles privacy_level lookup.
+      expect(mockFrom).toHaveBeenCalledTimes(2);
+      expect(sessions).toHaveLength(1);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -406,10 +443,13 @@ describe('updateSession', () => {
   it('validates skillMin against the current skillMax when only skillMin is patched', async () => {
     const chain = makeChain();
     mockFrom.mockReturnValue(chain as any);
-    // First .single() is the pre-update fetch of the current skill pair
-    // (skill_max: 5.0), second would be the UPDATE's .select().single() —
-    // never reached here since the cross-field check fails first.
-    chain['single'].mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null });
+    // First .single() is the admin-role check (not moderator — this caller
+    // is just the organizer). Second is the pre-update fetch of the current
+    // skill pair (skill_max: 5.0); the UPDATE's own .select().single() is
+    // never reached since the cross-field check fails first.
+    chain['single']
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null });
 
     const result = await updateSession(SESSION_ID, ORGANIZER_ID, { skillMin: 6 });
     expect(result).toEqual({ ok: false, reason: 'invalid_skill_range' });
@@ -420,7 +460,9 @@ describe('updateSession', () => {
   it('validates skillMax against the current skillMin when only skillMax is patched', async () => {
     const chain = makeChain();
     mockFrom.mockReturnValue(chain as any);
-    chain['single'].mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null });
+    chain['single']
+      .mockResolvedValueOnce({ data: null, error: null }) // admin-role check
+      .mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null });
 
     const result = await updateSession(SESSION_ID, ORGANIZER_ID, { skillMax: 2 });
     expect(result).toEqual({ ok: false, reason: 'invalid_skill_range' });
@@ -431,6 +473,7 @@ describe('updateSession', () => {
     const chain = makeChain();
     mockFrom.mockReturnValue(chain as any);
     chain['single']
+      .mockResolvedValueOnce({ data: null, error: null }) // admin-role check
       .mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null }) // pre-update fetch
       .mockResolvedValueOnce({ data: { ...BASE_SESSION_ROW, skill_min: 4.0 }, error: null }); // UPDATE result
 
@@ -445,6 +488,7 @@ describe('updateSession', () => {
     // Pre-fetch reads a still-valid pair (as if a concurrent request hasn't
     // committed its own patch yet) so the app-level check here passes...
     chain['single']
+      .mockResolvedValueOnce({ data: null, error: null }) // admin-role check
       .mockResolvedValueOnce({ data: { skill_min: 3.0, skill_max: 5.0 }, error: null })
       // ...but by the time this UPDATE runs, the row has already been
       // patched by that concurrent request and now violates
@@ -461,8 +505,58 @@ describe('updateSession', () => {
     chain['single'].mockResolvedValue({ data: BASE_SESSION_ROW, error: null });
 
     await updateSession(SESSION_ID, ORGANIZER_ID, { notes: 'no skill change' });
-    // Only one .single() call (the UPDATE's) — no pre-fetch.
-    expect(chain['single']).toHaveBeenCalledTimes(1);
+    // Two .single() calls: the admin-role check, then the UPDATE's — no
+    // separate skill-pair pre-fetch.
+    expect(chain['single']).toHaveBeenCalledTimes(2);
+  });
+
+  it('writes an admin_session_edits audit row when a moderator edits another organizer\'s session', async () => {
+    const auditChain = arrayChain([]);
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'moderator' }) as any) // admin-role check
+      .mockReturnValueOnce(singleChain(BASE_SESSION_ROW) as any) // before-fetch (moderator path)
+      .mockReturnValueOnce(
+        singleChain({ ...BASE_SESSION_ROW, notes: 'moderator edit' }) as any,
+      ) // UPDATE result
+      .mockReturnValueOnce(auditChain as any); // audit insert
+
+    await updateSession(SESSION_ID, 'mod-1', { notes: 'moderator edit' });
+    expect(auditChain['insert']).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      performed_by: 'mod-1',
+      action: 'edit',
+      changes: [{ field: 'notes', before: null, after: 'moderator edit' }],
+    });
+  });
+
+  it('excludes patched fields that resolve to the same value from the audit diff', async () => {
+    const auditChain = arrayChain([]);
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'moderator' }) as any) // admin-role check
+      .mockReturnValueOnce(singleChain(BASE_SESSION_ROW) as any) // before-fetch — venue_name unchanged
+      .mockReturnValueOnce(
+        singleChain({ ...BASE_SESSION_ROW, notes: 'moderator edit' }) as any,
+      ) // UPDATE result
+      .mockReturnValueOnce(auditChain as any); // audit insert
+
+    // venueName is re-sent with its existing value alongside the real change.
+    await updateSession(SESSION_ID, 'mod-1', { venueName: BASE_SESSION_ROW.venue_name, notes: 'moderator edit' });
+    expect(auditChain['insert']).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      performed_by: 'mod-1',
+      action: 'edit',
+      changes: [{ field: 'notes', before: null, after: 'moderator edit' }],
+    });
+  });
+
+  it('does not write an audit row when the organizer edits their own session', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: BASE_SESSION_ROW, error: null });
+
+    await updateSession(SESSION_ID, ORGANIZER_ID, { notes: 'own edit' });
+    // Only the admin-role check + the UPDATE itself — no audit insert.
+    expect(mockFrom).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -474,6 +568,10 @@ describe('cancelSession', () => {
   it('returns true when organizer cancels their upcoming session', async () => {
     const chain = makeChain();
     mockFrom.mockReturnValue(chain as any);
+    // The admin-role check's .single() call shares this same mocked chain
+    // (mockReturnValue, not Once) — configure it so getAdminRole doesn't
+    // crash destructuring an unconfigured vi.fn()'s undefined return.
+    chain['single'].mockResolvedValue({ data: null, error: null });
     chain.resolveAs({ data: [{ id: SESSION_ID }], error: null });
     expect(await cancelSession(SESSION_ID, ORGANIZER_ID)).toBe(true);
   });
@@ -481,6 +579,7 @@ describe('cancelSession', () => {
   it('returns false when DB returns an error (not organizer or not upcoming)', async () => {
     const chain = makeChain();
     mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: null, error: null });
     chain.resolveAs({ error: new Error('no rows') });
     expect(await cancelSession(SESSION_ID, 'other-user')).toBe(false);
   });
@@ -490,8 +589,47 @@ describe('cancelSession', () => {
     // return true here. The fix reads back affected rows and checks data.length > 0.
     const chain = makeChain();
     mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: null, error: null });
     chain.resolveAs({ data: [], error: null });
     expect(await cancelSession(SESSION_ID, 'other-user')).toBe(false);
+  });
+
+  it('writes an admin_session_edits audit row when a moderator cancels another organizer\'s session', async () => {
+    const roleChain = singleChain({ role: 'moderator' });
+    const cancelChain = arrayChain([{ id: SESSION_ID }]);
+    const auditChain = arrayChain([]);
+    mockFrom
+      .mockReturnValueOnce(roleChain as any)
+      .mockReturnValueOnce(cancelChain as any)
+      .mockReturnValueOnce(auditChain as any);
+
+    expect(await cancelSession(SESSION_ID, 'mod-1')).toBe(true);
+    expect(auditChain['insert']).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      performed_by: 'mod-1',
+      action: 'cancel',
+      changes: [{ field: 'status', before: 'upcoming', after: 'cancelled' }],
+    });
+  });
+
+  it('does not write an audit row when the organizer cancels their own session', async () => {
+    const chain = makeChain();
+    mockFrom.mockReturnValue(chain as any);
+    chain['single'].mockResolvedValue({ data: null, error: null });
+    chain.resolveAs({ data: [{ id: SESSION_ID }], error: null });
+
+    expect(await cancelSession(SESSION_ID, ORGANIZER_ID)).toBe(true);
+    // admin-role check + the cancel update only — no audit insert.
+    expect(mockFrom).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not write an audit row when a moderator-initiated cancel affects zero rows', async () => {
+    const roleChain = singleChain({ role: 'moderator' });
+    const cancelChain = arrayChain([]);
+    mockFrom.mockReturnValueOnce(roleChain as any).mockReturnValueOnce(cancelChain as any);
+
+    expect(await cancelSession(SESSION_ID, 'mod-1')).toBe(false);
+    expect(mockFrom).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -503,6 +641,7 @@ describe('progressSessionStatus', () => {
   it('advances upcoming → active', async () => {
     mockFrom
       .mockReturnValueOnce(singleChain({ status: 'upcoming', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain(null) as any) // admin-role check — not moderator
       .mockReturnValueOnce(singleChain({ ...BASE_SESSION_ROW, status: 'active' }) as any);
 
     const result = await progressSessionStatus(SESSION_ID, ORGANIZER_ID);
@@ -512,6 +651,7 @@ describe('progressSessionStatus', () => {
   it('advances active → completed', async () => {
     mockFrom
       .mockReturnValueOnce(singleChain({ status: 'active', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain(null) as any) // admin-role check
       .mockReturnValueOnce(singleChain({ ...BASE_SESSION_ROW, status: 'completed' }) as any);
 
     const result = await progressSessionStatus(SESSION_ID, ORGANIZER_ID);
@@ -528,9 +668,9 @@ describe('progressSessionStatus', () => {
   });
 
   it('returns forbidden when caller is not the organizer', async () => {
-    mockFrom.mockReturnValueOnce(
-      singleChain({ status: 'upcoming', organizer_id: ORGANIZER_ID }) as any,
-    );
+    mockFrom
+      .mockReturnValueOnce(singleChain({ status: 'upcoming', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain(null) as any); // admin-role check — not moderator either
 
     expect(await progressSessionStatus(SESSION_ID, 'other-user')).toEqual({
       ok: false,
@@ -539,9 +679,9 @@ describe('progressSessionStatus', () => {
   });
 
   it('returns invalid_transition for completed sessions', async () => {
-    mockFrom.mockReturnValueOnce(
-      singleChain({ status: 'completed', organizer_id: ORGANIZER_ID }) as any,
-    );
+    mockFrom
+      .mockReturnValueOnce(singleChain({ status: 'completed', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain(null) as any); // admin-role check
 
     expect(await progressSessionStatus(SESSION_ID, ORGANIZER_ID)).toEqual({
       ok: false,
@@ -550,14 +690,43 @@ describe('progressSessionStatus', () => {
   });
 
   it('returns invalid_transition for cancelled sessions', async () => {
-    mockFrom.mockReturnValueOnce(
-      singleChain({ status: 'cancelled', organizer_id: ORGANIZER_ID }) as any,
-    );
+    mockFrom
+      .mockReturnValueOnce(singleChain({ status: 'cancelled', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain(null) as any); // admin-role check
 
     expect(await progressSessionStatus(SESSION_ID, ORGANIZER_ID)).toEqual({
       ok: false,
       reason: 'invalid_transition',
     });
+  });
+
+  it('writes an admin_session_edits audit row when a moderator advances another organizer\'s session', async () => {
+    const auditChain = arrayChain([]);
+    mockFrom
+      .mockReturnValueOnce(singleChain({ status: 'upcoming', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain({ role: 'moderator' }) as any) // admin-role check
+      .mockReturnValueOnce(singleChain({ ...BASE_SESSION_ROW, status: 'active' }) as any)
+      .mockReturnValueOnce(auditChain as any);
+
+    const result = await progressSessionStatus(SESSION_ID, 'mod-1');
+    expect(result.ok).toBe(true);
+    expect(auditChain['insert']).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      performed_by: 'mod-1',
+      action: 'advance_status',
+      changes: [{ field: 'status', before: 'upcoming', after: 'active' }],
+    });
+  });
+
+  it('does not write an audit row when the organizer advances their own session', async () => {
+    mockFrom
+      .mockReturnValueOnce(singleChain({ status: 'upcoming', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain(null) as any) // admin-role check — not moderator
+      .mockReturnValueOnce(singleChain({ ...BASE_SESSION_ROW, status: 'active' }) as any);
+
+    const result = await progressSessionStatus(SESSION_ID, ORGANIZER_ID);
+    expect(result.ok).toBe(true);
+    expect(mockFrom).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -577,7 +746,9 @@ describe('markAttendance', () => {
   });
 
   it('returns forbidden when caller is not organizer', async () => {
-    mockFrom.mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any);
+    mockFrom
+      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)
+      .mockReturnValueOnce(singleChain(null) as any); // admin-role check — not moderator either
     expect(await markAttendance(SESSION_ID, 'other-user', [])).toEqual({
       ok: false,
       reason: 'forbidden',
@@ -585,9 +756,9 @@ describe('markAttendance', () => {
   });
 
   it('returns not_completed when session is not completed', async () => {
-    mockFrom.mockReturnValueOnce(
-      singleChain({ status: 'upcoming', organizer_id: ORGANIZER_ID }) as any,
-    );
+    mockFrom
+      .mockReturnValueOnce(singleChain({ status: 'upcoming', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain(null) as any); // admin-role check
     expect(await markAttendance(SESSION_ID, ORGANIZER_ID, [])).toEqual({
       ok: false,
       reason: 'not_completed',
@@ -601,6 +772,7 @@ describe('markAttendance', () => {
 
     mockFrom
       .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // session fetch
+      .mockReturnValueOnce(singleChain(null) as any) // admin-role check
       .mockReturnValueOnce(
         arrayChain([{ user_id: attendedId }, { user_id: noShowId }]) as any, // going RSVPs
       )
@@ -614,7 +786,7 @@ describe('markAttendance', () => {
       uids: [noShowId],
       points: 10,
     });
-    expect(mockFrom).toHaveBeenCalledTimes(4);
+    expect(mockFrom).toHaveBeenCalledTimes(5);
   });
 
   it('skips rpc and no_show update when all going users attended', async () => {
@@ -622,13 +794,14 @@ describe('markAttendance', () => {
 
     mockFrom
       .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)
+      .mockReturnValueOnce(singleChain(null) as any) // admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any)
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any); // attended update only, affected rows
 
     const result = await markAttendance(SESSION_ID, ORGANIZER_ID, [attendedId]);
     expect(result).toEqual({ ok: true, attended: 1, noShows: 0 });
-    // exactly 3 from() calls: session, going RSVPs, attended update
-    expect(mockFrom).toHaveBeenCalledTimes(3);
+    // exactly 4 from() calls: session, admin-role check, going RSVPs, attended update
+    expect(mockFrom).toHaveBeenCalledTimes(4);
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
@@ -638,6 +811,7 @@ describe('markAttendance', () => {
 
     mockFrom
       .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // session fetch
+      .mockReturnValueOnce(singleChain(null) as any) // admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any) // going RSVPs
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any); // no_show update affected rows
 
@@ -661,9 +835,11 @@ describe('markAttendance', () => {
 
     mockFrom
       .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // call 1: session
+      .mockReturnValueOnce(singleChain(null) as any) // call 1: admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any) // call 1: going RSVPs
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any) // call 1: no_show update actually affects the row
       .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // call 2: session
+      .mockReturnValueOnce(singleChain(null) as any) // call 2: admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any) // call 2: stale going read (race)
       .mockReturnValueOnce(arrayChain([]) as any); // call 2: no_show update affects nothing (already flipped)
 
@@ -683,11 +859,12 @@ describe('markAttendance', () => {
     // Empty going RSVPs (all already processed in a prior call)
     mockFrom
       .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)
+      .mockReturnValueOnce(singleChain(null) as any) // admin-role check
       .mockReturnValueOnce(arrayChain([]) as any);
 
     const result = await markAttendance(SESSION_ID, ORGANIZER_ID, []);
     expect(result).toEqual({ ok: true, attended: 0, noShows: 0 });
-    expect(mockFrom).toHaveBeenCalledTimes(2);
+    expect(mockFrom).toHaveBeenCalledTimes(3);
   });
 
   it('returns write_failed and stops early when the attended-status write fails', async () => {
@@ -702,14 +879,51 @@ describe('markAttendance', () => {
 
     mockFrom
       .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)          // session fetch
+      .mockReturnValueOnce(singleChain(null) as any)                       // admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }, { user_id: noShowId }]) as any) // going RSVPs
       .mockReturnValueOnce(errorChain as any);                              // attended write FAILS
 
     const result = await markAttendance(SESSION_ID, ORGANIZER_ID, [attendedId]);
     expect(result).toEqual({ ok: false, reason: 'write_failed' });
-    // Exactly 3 from() calls — function halted before the no_show update (4th call)
-    expect(mockFrom).toHaveBeenCalledTimes(3);
+    // Exactly 4 from() calls — function halted before the no_show update (5th call)
+    expect(mockFrom).toHaveBeenCalledTimes(4);
     expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('writes an admin_session_edits audit row when a moderator marks attendance for another organizer\'s session', async () => {
+    const attendedId = 'user-attended';
+    const auditChain = arrayChain([]);
+    mockFrom
+      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // session fetch
+      .mockReturnValueOnce(singleChain({ role: 'moderator' }) as any) // admin-role check
+      .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any) // going RSVPs
+      .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any) // attended update
+      .mockReturnValueOnce(auditChain as any); // audit insert
+
+    const result = await markAttendance(SESSION_ID, 'mod-1', [attendedId]);
+    expect(result).toEqual({ ok: true, attended: 1, noShows: 0 });
+    expect(auditChain['insert']).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      performed_by: 'mod-1',
+      action: 'mark_attendance',
+      changes: [
+        { field: 'attended', before: null, after: 1 },
+        { field: 'noShows', before: null, after: 0 },
+      ],
+    });
+  });
+
+  it('does not write an audit row when the organizer marks attendance for their own session', async () => {
+    const attendedId = 'user-attended';
+    mockFrom
+      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)
+      .mockReturnValueOnce(singleChain(null) as any) // admin-role check — not moderator
+      .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any)
+      .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any);
+
+    const result = await markAttendance(SESSION_ID, ORGANIZER_ID, [attendedId]);
+    expect(result).toEqual({ ok: true, attended: 1, noShows: 0 });
+    expect(mockFrom).toHaveBeenCalledTimes(4);
   });
 });
 

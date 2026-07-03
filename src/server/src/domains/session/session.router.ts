@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { auth, getOptionalUserId } from '../../middleware/auth.js';
+import { getAdminRole, roleAtLeast } from '../../lib/admin.js';
 import type { SessionStatus, SessionType, SessionFormat, SessionVisibility, ShuttlePolicy } from '@pavilion/types';
 import {
   getSessionById,
@@ -159,7 +160,7 @@ function validateSessionFieldValues(fields: {
 sessionRouter.get('/', async (c) => {
   const {
     status, id, name, venue_id, organizer_id, attendee_id,
-    date_from, date_to, city, region, skill_min, skill_max,
+    date_from, date_to, city, region, skill_min, skill_max, admin,
   } = c.req.query();
 
   if (status !== undefined && !VALID_STATUSES.includes(status as SessionStatus)) {
@@ -192,11 +193,20 @@ sessionRouter.get('/', async (c) => {
 
   if (attendee_id !== undefined) filters.attendeeId = attendee_id;
 
-  // Resolve optional caller identity for privacy enforcement:
-  // attendee_id — respects private-profile visibility
-  // organizer_id — gates invite_only sessions to the organizer themselves
-  // id — gates an exact-id-matched invite_only session to authenticated callers
-  if (attendee_id !== undefined || organizer_id !== undefined || id !== undefined) {
+  // admin=true — moderator+ search, bypasses every visibility rule below.
+  // Role is only resolved when this flag is present, so an ordinary browse
+  // request never pays for the extra admins-table lookup.
+  if (admin === 'true') {
+    const requestingUserId = await getOptionalUserId(c);
+    if (!requestingUserId) return c.json({ error: 'Unauthorized' }, 401);
+    const role = await getAdminRole(requestingUserId);
+    if (!roleAtLeast(role, 'moderator')) return c.json({ error: 'Forbidden' }, 403);
+    filters.adminOverride = true;
+  } else if (attendee_id !== undefined || organizer_id !== undefined || id !== undefined) {
+    // Resolve optional caller identity for privacy enforcement:
+    // attendee_id — respects private-profile visibility
+    // organizer_id — gates invite_only sessions to the organizer themselves
+    // id — gates an exact-id-matched invite_only session to authenticated callers
     const requestingUserId = await getOptionalUserId(c);
     if (requestingUserId) filters.requestingUserId = requestingUserId;
   }

@@ -1,6 +1,6 @@
 # Database Schema
 
-_Last updated: 2026-07-02 (added `profiles.first_name`/`last_name`, required once `verified_tier` is set; added `venues.lng`/`lat` generated columns; added `service_role` schema GRANTs — see technical-notes.md "Environments"; corrected `internal_score`'s range; added `profiles.onboarding_completed_at` and the `onboarding_quiz_responses` table (`ON DELETE CASCADE` from `profiles`) for the onboarding placement quiz — see technical-notes.md's KI-004 for why that cascade matters and where it's still missing elsewhere)_
+_Last updated: 2026-07-03 (added the unified admin History tab: `admin_user_edits`, `admin_session_edits`, `admin_venue_edits` tables with a `changes` jsonb column each, and a `rating_history.performed_by` column; `profiles.verified_tier`/`rating_floor` now have a write path via `PATCH /api/users/:id/verify` — see technical-notes.md "Admin & Roles")_
 
 PostgreSQL via Supabase. PostGIS extension enabled.
 
@@ -25,8 +25,8 @@ See `technical-notes.md` for lookup logic, derivation formulas, and access contr
 | `play_style` | text | `'competitive'`, `'social'`, `'training'` |
 | `privacy_level` | text | `'private'`, `'public'` — default `'private'` |
 | `internal_score` | numeric(5,2) | 1.00–10+, intentionally unbounded above 10 (elite tier has no ceiling) |
-| `verified_tier` | integer | nullable |
-| `rating_floor` | numeric(5,2) | nullable |
+| `verified_tier` | integer | nullable. Set via `PATCH /api/users/:id/verify` (admin+) — see technical-notes.md "Verification approval action" |
+| `rating_floor` | numeric(5,2) | nullable. Always 6.0 when `verified_tier` is set, regardless of tier — see technical-notes.md "Verification approval action" |
 | `reliability_score` | numeric(5,2) | default 100 |
 | `placement_sessions_remaining` | integer | default 3 |
 | `demotion_protection_started_at` | timestamptz | nullable. Set when a vote first trends the player below their current grade's floor; cleared on recovery or release |
@@ -43,9 +43,68 @@ See `technical-notes.md` for lookup logic, derivation formulas, and access contr
 | Column | Type | Notes |
 |---|---|---|
 | `user_id` | uuid PK | FK → profiles |
-| `role` | text | default `'admin'`. `'admin'`, `'moderator'`, `'venue_verifier'` |
+| `role` | text | default `'admin'`. `'venue_verifier'`, `'moderator'`, `'admin'`, `'owner'` — ranked in that order, a higher role can do everything a lower one can. No CHECK constraint — enforced app-side only (`src/server/src/lib/admin.ts`), same convention as `session_rsvps.status` |
 | `granted_by` | uuid | nullable. FK → profiles |
 | `created_at` | timestamptz | |
+
+---
+
+### `admin_role_changes`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `target_user_id` | uuid | FK → profiles |
+| `old_role` | text | nullable. Null means the target had no role before this change |
+| `new_role` | text | nullable. Null means the role was removed |
+| `changed_by` | uuid | FK → profiles |
+| `created_at` | timestamptz | |
+
+Audit trail — mirrors why `rating_history`/`onboarding_quiz_responses` exist. Written by `PATCH`/`DELETE /api/admin/roles/:userId`. Read back, along with the three tables below and the admin-adjustment `rating_history` rows, by `GET /api/admin/history` (the unified History tab) — see technical-notes.md "Admin & Roles".
+
+---
+
+### `admin_user_edits`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `target_user_id` | uuid | FK → profiles |
+| `performed_by` | uuid | FK → profiles |
+| `changes` | jsonb | nullable. Array of `{ field, before, after }` — one entry per patched field (camelCase `User` field names, e.g. `displayName`), only for fields actually present in the request body. Null if the pre-update fetch failed to find a "before" row (shouldn't happen in practice) |
+| `created_at` | timestamptz | |
+
+Audit trail for moderator+ profile edits (`PATCH /api/users/:id` when the caller isn't the profile owner). No `action` column — profile edit is this domain's only admin-override action. Two FKs to `profiles` — needs `!<fkey_name>` embed disambiguation, same as `admins`/`admin_role_changes`. Self-edits are never logged here. See technical-notes.md "Admin & Roles".
+
+---
+
+### `admin_session_edits`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `session_id` | uuid | FK → sessions |
+| `performed_by` | uuid | FK → profiles |
+| `action` | text | `'edit'`, `'cancel'`, `'advance_status'`, `'mark_attendance'`. No CHECK constraint — same app-layer-enforced-enum convention as `admins.role` |
+| `changes` | jsonb | nullable. Array of `{ field, before, after }`. `edit`: one entry per patched `Session` field. `cancel`/`advance_status`: a single synthetic `status` entry (e.g. `upcoming` → `active`). `mark_attendance`: synthetic `attended`/`noShows` entries (`before: null`, `after: <count>` — there's no prior count to diff against) |
+| `created_at` | timestamptz | |
+
+Audit trail for moderator+ session overrides (`updateSession`/`cancelSession`/`progressSessionStatus`/`markAttendance` in `session.service.ts`, only on the branch that skips the organizer-ownership check). Organizer self-actions are never logged here. See technical-notes.md "Admin & Roles".
+
+---
+
+### `admin_venue_edits`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `venue_id` | uuid | FK → venues |
+| `performed_by` | uuid | FK → profiles |
+| `action` | text | `'create'`, `'edit'`. No CHECK constraint, same convention as above |
+| `changes` | jsonb | nullable. Array of `{ field, before, after }`, one per patched `Venue` field. Always null for `create` — there's no "before" state for a new row |
+| `created_at` | timestamptz | |
+
+Audit trail for venue_verifier+ venue writes. `createVenue` always logs (venue_verifier+ is already required to call it at all); `updateVenue` logs only on the admin branch, not the claimed-owner branch. See technical-notes.md "Admin & Roles".
 
 ---
 
@@ -181,7 +240,8 @@ UNIQUE `(session_id, rater_id, ratee_id)`.
 |---|---|---|
 | `id` | uuid PK | |
 | `user_id` | uuid | FK → profiles |
-| `session_id` | uuid | FK → sessions |
+| `session_id` | uuid | nullable. FK → sessions. Null for an admin-initiated manual rating adjustment (`POST /api/ratings/user/:userId/adjust`), which has no associated session — see technical-notes.md "Admin & Roles" |
+| `performed_by` | uuid | nullable. FK → profiles. Set only on the `session_id IS NULL` (admin-adjustment) rows — the admin who made the adjustment. Null on peer-vote rows. Two FKs to `profiles` (`user_id`, `performed_by`) — needs the same `!<fkey_name>` embed disambiguation as `admins`/`admin_role_changes` when both sides are queried together (see "Admin & Roles" below) |
 | `score_before` | numeric(5,2) | |
 | `score_after` | numeric(5,2) | |
 | `delta` | numeric(5,2) | |
@@ -242,7 +302,12 @@ CREATE INDEX ON session_rsvps (session_id, status);
 CREATE INDEX ON rating_history (user_id, created_at DESC);
 CREATE INDEX ON rater_familiarity (rater_id, ratee_id);
 CREATE INDEX ON session_rating_submissions (flagged) WHERE flagged = true;
+CREATE INDEX ON admin_user_edits (created_at DESC);
+CREATE INDEX ON admin_session_edits (created_at DESC);
+CREATE INDEX ON admin_venue_edits (created_at DESC);
 ```
+
+No index on `admin_role_changes` — lowest-volume of the four audit tables (role grants/revokes happen far less often than profile/session/venue edits or rating adjustments), so a sequential scan on `created_at` is fine at this scale. Revisit if that assumption stops holding.
 
 ---
 
