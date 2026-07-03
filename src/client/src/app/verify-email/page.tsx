@@ -24,7 +24,14 @@ function VerifyEmailContent() {
     setResent(false);
 
     const supabase = createClient();
-    const { error: resendError } = await supabase.auth.resend({ type: 'signup', email });
+    // Same emailRedirectTo as signup/page.tsx's initial signUp() call — see
+    // its comment for why (GoTrue's default template is active, not
+    // confirm_signup.html, so this controls where the browser lands post-confirm).
+    const { error: resendError } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/login` },
+    });
 
     setIsSubmitting(false);
     if (resendError) {

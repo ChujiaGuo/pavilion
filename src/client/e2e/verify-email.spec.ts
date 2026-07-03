@@ -3,10 +3,11 @@ import { test, expect } from '@playwright/test';
 import { supabaseAdmin } from './helpers/supabase-admin';
 import { waitForEmailLink } from './helpers/mailpit';
 
-test('signing up, confirming via the emailed link, and continuing reaches onboarding', async ({
+test('signing up, confirming via the emailed link, and logging in reaches onboarding', async ({
   page,
 }) => {
   const email = `e2e-verify-${randomUUID()}@example.test`;
+  const password = 'password123';
   const signupResponse = page.waitForResponse(
     (res) => res.url().includes('/auth/v1/signup') && res.request().method() === 'POST'
   );
@@ -15,7 +16,7 @@ test('signing up, confirming via the emailed link, and continuing reaches onboar
   await page.fill('#displayName', 'Verify Test User');
   await page.fill('#email', email);
   await page.fill('#city', 'Baltimore');
-  await page.fill('#password', 'password123');
+  await page.fill('#password', password);
   await page.getByRole('button', { name: 'Create account' }).click();
 
   const userId: string = (await (await signupResponse).json()).id;
@@ -24,22 +25,33 @@ test('signing up, confirming via the emailed link, and continuing reaches onboar
   await expect(page.getByRole('heading', { name: 'Verify your email' })).toBeVisible();
   await expect(page.getByText(email)).toBeVisible();
 
-  // /auth/confirm's verifyOtp call needs no browser-side state (unlike the
-  // PKCE /auth/callback route), so following the link in the same Playwright
-  // context as the signup isn't load-bearing here — it's just simplest.
+  // This project's confirmation email is currently GoTrue's plain default
+  // template, not the branded supabase/templates/confirm_signup.html — see
+  // supabase/config.toml's commented-out [auth.email.template.confirmation]
+  // and technical-notes.md "Auth" for why (free-tier plan restriction). The
+  // default template's link goes to GoTrue's own hosted /verify endpoint,
+  // which always confirms the account server-side before redirecting —
+  // independent of the /auth/confirm route this app built for the branded
+  // template (covered separately below via a direct route hit, since
+  // nothing in the real flow reaches it while the template stays inactive).
+  // signup/page.tsx's emailRedirectTo sends the post-confirm redirect to
+  // /login rather than the bare marketing page.
   const confirmLink = await waitForEmailLink(email);
   await page.goto(confirmLink);
-  await page.waitForURL('/email-confirmed');
-  await expect(page.getByRole('heading', { name: 'Email confirmed' })).toBeVisible();
-
-  await page.getByRole('link', { name: 'Continue to Pavilion' }).click();
-  // /home's own auth guard bounces a not-yet-onboarded user onward — same
-  // pattern /reset-password's post-update redirect relies on.
-  await page.waitForURL('/onboarding/quiz');
+  await page.waitForURL(/\/login/);
 
   const { data: userData, error } = await supabaseAdmin.auth.admin.getUserById(userId);
   expect(error).toBeNull();
   expect(userData.user?.email_confirmed_at).not.toBeNull();
+
+  // Confirming doesn't itself establish a usable app session (GoTrue's
+  // default template redirects with an implicit-flow hash fragment nothing
+  // on this page consumes) — logging in normally is how a real user
+  // actually gets in once /login is reached this way.
+  await page.fill('#email', email);
+  await page.fill('#password', password);
+  await page.getByRole('button', { name: 'Log in' }).click();
+  await page.waitForURL('/onboarding/quiz');
 
   await supabaseAdmin.auth.admin.deleteUser(userId);
 });

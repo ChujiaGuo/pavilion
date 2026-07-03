@@ -265,17 +265,20 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Confirm-signup template — content lives in supabase/templates/confirm_signup.html
-# (repo-relative, matching this key's own convention below), branded to match
-# design-system.md rather than GoTrue's plain default copy. The template links
-# to this app's own /auth/confirm route (token_hash + type=email) instead of
-# the default ConfirmationURL straight to GoTrue's hosted /verify endpoint —
-# see technical-notes.md "Auth" for why (PKCE code exchange doesn't survive
-# the link being opened in a different browser/device than the one that
-# signed up; verifyOtp with a token_hash does).
-[auth.email.template.confirmation]
-subject = "Confirm your Pavilion account"
-content_path = "./supabase/templates/confirm_signup.html"
+# Confirm-signup template — built and ready (supabase/templates/confirm_signup.html,
+# branded to match design-system.md, linking to this app's own /auth/confirm route
+# instead of GoTrue's default hosted /verify endpoint — see technical-notes.md "Auth"
+# for the full design), but NOT active: `supabase config push` rejected it with
+# "Email template modification is not available for free tier projects using the
+# default email provider" — this project has no custom SMTP configured (see
+# [auth.email.smtp] above), so template customization is plan-gated. Deferred to
+# v2 per brainstorm.md's Future Features Roadmap; uncomment once custom SMTP is
+# set up or the plan is upgraded, matching whichever unblocks it first. Left
+# commented out locally too (not just in what gets pushed) so local dev exercises
+# the exact same GoTrue-default-template flow prod is actually running.
+# [auth.email.template.confirmation]
+# subject = "Confirm your Pavilion account"
+# content_path = "./supabase/templates/confirm_signup.html"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]

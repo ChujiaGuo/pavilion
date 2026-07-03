@@ -46,6 +46,15 @@ export default function SignupPage() {
           ...(firstName && { first_name: firstName }),
           ...(lastName && { last_name: lastName }),
         },
+        // Confirm_signup.html (which links to /auth/confirm) isn't active —
+        // see supabase/config.toml's commented-out [auth.email.template.confirmation]
+        // — so this project is on GoTrue's default template, whose link points
+        // at GoTrue's own hosted /verify endpoint, not our app. That endpoint
+        // always confirms the account server-side regardless of where it then
+        // redirects; emailRedirectTo just controls where the browser lands
+        // afterward — /login rather than the bare marketing page, so there's
+        // something to do once they get there instead of a dangling #access_token.
+        emailRedirectTo: `${window.location.origin}/login`,
       },
     });
 
