@@ -4,7 +4,7 @@ import { supabaseAdmin } from './helpers/supabase-admin';
 
 test('direct navigation to /home while logged out redirects to /login', async ({ page }) => {
   await page.goto('/home');
-  await page.waitForURL('/login');
+  await page.waitForURL(/\/login(\?|$)/);
 });
 
 test.describe('home dashboard', () => {

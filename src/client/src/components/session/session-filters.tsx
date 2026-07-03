@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Popover as PopoverPrimitive } from '@base-ui/react';
 import { useMediaQuery } from '@base-ui/react/unstable-use-media-query';
 import { SlidersHorizontal } from 'lucide-react';
@@ -12,13 +12,18 @@ import {
   DrawerDescription,
   DrawerFooter,
 } from '@/components/ui/drawer';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { formatDateRangeSummary } from '@/lib/session-format';
 import { fieldClassName, labelClassName } from './field-styles';
 
+// How long to let typing/adjustments settle before re-fetching — one timer
+// shared across every field (search, date, skill) so a burst of edits across
+// several fields still collapses into a single request instead of one per
+// field.
+const APPLY_DEBOUNCE_MS = 400;
+
 export interface BrowseFilters {
-  city: string;
+  search: string;
   dateFrom: string;
   dateTo: string;
   skillMin: string;
@@ -87,33 +92,43 @@ interface SessionFiltersProps {
 // below the `sm` breakpoint, a Popover-based dropdown at `sm` and up —
 // matching AppNav's existing bottom-tab-bar/sidebar split rather than
 // forcing one interaction pattern onto both form factors.
+//
+// Reactive, not submit-driven: every field (search, date, skill) auto-applies
+// after APPLY_DEBOUNCE_MS of no further changes, rather than requiring an
+// explicit Search/Apply click. One shared debounce timer covers the whole
+// `draft` object, so a burst of edits across multiple fields still collapses
+// into a single re-fetch. `lastAppliedRef` skips re-firing onApply with a
+// filter set that's already been applied (true on mount, and right after
+// Reset, which applies synchronously) — otherwise the debounce would still
+// fire once more with an identical, redundant request.
 export function SessionFilters({ value, skillDefaults, onApply }: SessionFiltersProps) {
   const [draft, setDraft] = useState<BrowseFilters>(value);
   const [isOpen, setIsOpen] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 640px)', { noSsr: true });
+  const lastAppliedRef = useRef(JSON.stringify(value));
 
   const hasNarrowedSkill = draft.skillMin !== skillDefaults.skillMin || draft.skillMax !== skillDefaults.skillMax;
   // YYYY-MM-DD strings compare correctly lexicographically — no Date parsing needed.
   const isDateRangeInvalid = draft.dateFrom !== '' && draft.dateTo !== '' && draft.dateTo < draft.dateFrom;
 
+  useEffect(() => {
+    if (isDateRangeInvalid) return;
+    const serialized = JSON.stringify(draft);
+    if (serialized === lastAppliedRef.current) return;
+    const timeout = setTimeout(() => {
+      lastAppliedRef.current = serialized;
+      onApply(draft);
+    }, APPLY_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [draft, isDateRangeInvalid, onApply]);
+
   function handleDraftChange(patch: Partial<BrowseFilters>) {
     setDraft((prev) => ({ ...prev, ...patch }));
   }
 
-  function handlePrimarySubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (isDateRangeInvalid) return;
-    onApply(draft);
-  }
-
-  function handleOverlayApply() {
-    if (isDateRangeInvalid) return;
-    onApply(draft);
-    setIsOpen(false);
-  }
-
   function handleReset() {
     const reset: BrowseFilters = { ...draft, skillMin: skillDefaults.skillMin, skillMax: skillDefaults.skillMax };
+    lastAppliedRef.current = JSON.stringify(reset);
     setDraft(reset);
     onApply(reset);
     setIsOpen(false);
@@ -130,17 +145,17 @@ export function SessionFilters({ value, skillDefaults, onApply }: SessionFilters
   );
 
   return (
-    <form onSubmit={handlePrimarySubmit} className="flex flex-wrap items-start gap-x-6 gap-y-4">
+    <div className="flex flex-wrap items-start gap-x-6 gap-y-4">
       <div className="min-w-[9rem] flex-1 basis-40">
-        <label htmlFor="filter-city" className={labelClassName}>
-          City
+        <label htmlFor="filter-search" className={labelClassName}>
+          Search
         </label>
         <input
-          id="filter-city"
+          id="filter-search"
           type="text"
-          placeholder="Any city"
-          value={draft.city}
-          onChange={(e) => handleDraftChange({ city: e.target.value })}
+          placeholder="Name or session ID"
+          value={draft.search}
+          onChange={(e) => handleDraftChange({ search: e.target.value })}
           className={fieldClassName}
         />
       </div>
@@ -206,9 +221,6 @@ export function SessionFilters({ value, skillDefaults, onApply }: SessionFilters
                       >
                         Reset to defaults
                       </button>
-                      <Button type="button" size="sm" disabled={isDateRangeInvalid} onClick={handleOverlayApply}>
-                        Apply
-                      </Button>
                     </div>
                   </PopoverPrimitive.Popup>
                 </PopoverPrimitive.Positioner>
@@ -244,24 +256,13 @@ export function SessionFilters({ value, skillDefaults, onApply }: SessionFilters
                     >
                       Reset to defaults
                     </button>
-                    <Button type="button" disabled={isDateRangeInvalid} onClick={handleOverlayApply}>
-                      Apply
-                    </Button>
                   </DrawerFooter>
                 </DrawerContent>
               </Drawer>
             </>
           )}
-
-          <button
-            type="submit"
-            disabled={isDateRangeInvalid}
-            className="shrink-0 rounded-full bg-primary px-5 py-2 text-sm font-medium text-white shadow-md transition-shadow hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Search
-          </button>
         </div>
       </div>
-    </form>
+    </div>
   );
 }

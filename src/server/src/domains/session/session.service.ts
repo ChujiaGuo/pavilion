@@ -125,6 +125,8 @@ export type SessionUpdateFields = Partial<
 
 export type SessionListFilters = {
   status?: SessionStatus;
+  id?: string;
+  name?: string;
   venueId?: string;
   organizerId?: string;
   attendeeId?: string;
@@ -168,6 +170,23 @@ export async function getSessionById(id: string): Promise<Session | null> {
 
 export async function listSessions(filters: SessionListFilters = {}): Promise<Session[]> {
   const status = filters.status ?? 'upcoming';
+
+  // Exact-id search bypasses the public-only visibility filter below (the
+  // caller already has the specific session — e.g. from a shared link) but
+  // still requires authentication to see an invite_only session, same rule
+  // GET /:id already applies. Ignores every other filter param.
+  if (filters.id) {
+    const { data, error } = await supabase
+      .from('sessions')
+      .select(SESSION_SELECT)
+      .eq('id', filters.id)
+      .eq('status', status)
+      .maybeSingle();
+    if (error || !data) return [];
+    const session = toSession(data as SessionRow);
+    if (session.visibility === 'invite_only' && !filters.requestingUserId) return [];
+    return [session];
+  }
 
   // attendeeId: enforce privacy then resolve session IDs from RSVPs the user was actually part of
   let attendeeSessionIds: string[] | null = null;
@@ -234,6 +253,7 @@ export async function listSessions(filters: SessionListFilters = {}): Promise<Se
   if (attendeeSessionIds) query = query.in('id', attendeeSessionIds);
   if (filters.venueId) query = query.eq('venue_id', filters.venueId);
   if (cityVenueIds) query = query.in('venue_id', cityVenueIds);
+  if (filters.name) query = query.ilike('venue_name', `%${filters.name}%`);
   if (filters.dateFrom) query = query.gte('starts_at', filters.dateFrom);
   if (filters.dateTo) query = query.lte('starts_at', filters.dateTo);
   // skill overlap: session range must overlap with the requested range

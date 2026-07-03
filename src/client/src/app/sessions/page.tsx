@@ -13,6 +13,7 @@ import {
   FALLBACK_SKILL_RANGE,
   todayIso,
   endOfDayIso,
+  isSessionId,
 } from '@/lib/session-format';
 import type { Session, SessionStatus, RatingDisplay } from '@pavilion/types';
 import { cn } from '@/lib/utils';
@@ -49,11 +50,11 @@ export default function SessionsPage() {
       .then(({ rating }) => {
         const defaults = computeDefaultSkillRange(rating.grade);
         setSkillDefaults(defaults);
-        setAppliedFilters({ city: '', dateFrom: todayIso(), dateTo: '', ...defaults });
+        setAppliedFilters({ search: '', dateFrom: todayIso(), dateTo: '', ...defaults });
       })
       .catch(() => {
         setSkillDefaults(FALLBACK_SKILL_RANGE);
-        setAppliedFilters({ city: '', dateFrom: todayIso(), dateTo: '', ...FALLBACK_SKILL_RANGE });
+        setAppliedFilters({ search: '', dateFrom: todayIso(), dateTo: '', ...FALLBACK_SKILL_RANGE });
       });
   }, [auth]);
 
@@ -66,7 +67,8 @@ export default function SessionsPage() {
     if (tab === 'hosting') params.set('organizer_id', userId);
     if (tab === 'attending') params.set('attendee_id', userId);
     if (tab === 'browse' && appliedFilters) {
-      if (appliedFilters.city) params.set('city', appliedFilters.city);
+      const search = appliedFilters.search.trim();
+      if (search) params.set(isSessionId(search) ? 'id' : 'name', search);
       if (appliedFilters.skillMin) params.set('skill_min', appliedFilters.skillMin);
       if (appliedFilters.skillMax) params.set('skill_max', appliedFilters.skillMax);
       if (appliedFilters.dateFrom) params.set('date_from', new Date(appliedFilters.dateFrom).toISOString());

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { createClient } from '@/lib/supabase/client';
+import { isSafeNextPath } from '@/lib/safe-next-path';
 
 const content = 'relative mx-auto px-6 sm:px-12 lg:w-2/3 lg:px-0';
 
@@ -18,6 +19,9 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const rawNext = searchParams.get('next');
+  const next = isSafeNextPath(rawNext) ? rawNext : null;
 
   useEffect(() => {
     if (searchParams.get('error') === 'oauth_failed') {
@@ -39,10 +43,10 @@ function LoginForm() {
       return;
     }
 
-    if (data.user.app_metadata?.onboarding_completed) {
-      router.replace('/home');
-    } else {
+    if (!data.user.app_metadata?.onboarding_completed) {
       router.replace('/onboarding/quiz');
+    } else {
+      router.replace(next ?? '/home');
     }
   }
 
@@ -100,7 +104,7 @@ function LoginForm() {
         </div>
 
         <div className="mt-6 max-w-md">
-          <GoogleSignInButton text="Sign in with Google" />
+          <GoogleSignInButton text="Sign in with Google" next={next} />
         </div>
 
         <p className="mt-8 text-sm text-neutral-600">

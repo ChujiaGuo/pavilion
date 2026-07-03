@@ -100,6 +100,15 @@ export function formatSkillRange(min: number, max: number): string {
   return `${formatSkillValue(min)}–${formatSkillValue(max)}`;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Browse's search box auto-detects an exact session-id paste (e.g. from a
+// shared link) vs. a plain-text venue-name search — see GET /api/sessions'
+// id/name query params (session.router.ts).
+export function isSessionId(value: string): boolean {
+  return UUID_RE.test(value.trim());
+}
+
 // Same bounds `rating.algorithm.ts` (server) enforces: MIN_SCORE = 1.0 is the
 // scale floor, UNVERIFIED_CEILING = 7.99 is where peer-rated (non-pro-verified)
 // players cap out — see technical-notes.md's "Rating System". Not imported

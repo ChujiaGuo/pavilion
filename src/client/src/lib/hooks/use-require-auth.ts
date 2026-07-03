@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
 export interface RequiredAuth {
@@ -16,13 +16,17 @@ export interface RequiredAuth {
 // rendering — callers should `return null` while this is null.
 export function useRequireAuth(): RequiredAuth | null {
   const router = useRouter();
+  const pathname = usePathname();
   const [auth, setAuth] = useState<RequiredAuth | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
-        router.replace('/login');
+        // Carries the page the user was trying to reach (e.g. a shared
+        // session link) so /login can send them back after signing in —
+        // see login/page.tsx's `next` handling.
+        router.replace(`/login?next=${encodeURIComponent(pathname)}`);
         return;
       }
       if (!session.user.app_metadata?.onboarding_completed) {
@@ -31,7 +35,7 @@ export function useRequireAuth(): RequiredAuth | null {
       }
       setAuth({ accessToken: session.access_token, userId: session.user.id });
     });
-  }, [router]);
+  }, [router, pathname]);
 
   return auth;
 }

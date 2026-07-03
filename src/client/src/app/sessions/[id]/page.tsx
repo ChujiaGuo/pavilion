@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { Share2 } from 'lucide-react';
 import { useRequireAuth } from '@/lib/hooks/use-require-auth';
 import { apiGet, apiPost, apiPatch, apiDelete, ApiError } from '@/lib/api';
 import { AppShell } from '@/components/nav/app-shell';
@@ -93,6 +94,8 @@ export default function SessionDetailPage() {
   const [attendanceResult, setAttendanceResult] = useState<{ attended: number; noShows: number } | null>(
     null,
   );
+
+  const [isCopied, setIsCopied] = useState(false);
 
   const loadAll = useCallback(async () => {
     if (!auth) return;
@@ -276,6 +279,42 @@ export default function SessionDetailPage() {
     }
   }
 
+  // The Async Clipboard API (navigator.clipboard) only exists in a secure
+  // context — https, or http on localhost/127.0.0.1. Testing over a LAN IP
+  // (e.g. Safari on a phone hitting http://192.168.1.x:3000) leaves it
+  // undefined, so this falls back to the older execCommand('copy') path,
+  // which has no such restriction.
+  function legacyCopyToClipboard(text: string): boolean {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const succeeded = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return succeeded;
+  }
+
+  async function handleShare() {
+    const url = window.location.href;
+    let succeeded = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        succeeded = true;
+      }
+    } catch {
+      // Fall through to the legacy path below.
+    }
+    if (!succeeded) succeeded = legacyCopyToClipboard(url);
+    if (succeeded) {
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 1000);
+    }
+  }
+
   if (isLoading) {
     return (
       <AppShell>
@@ -310,6 +349,21 @@ export default function SessionDetailPage() {
       <p className="mt-1 text-neutral-500">
         Hosted by {session.organizerName ?? 'a Pavilion user'}
       </p>
+
+      <div className="relative mt-3 inline-block">
+        {isCopied && (
+          <div
+            role="status"
+            className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 animate-in fade-in-0 zoom-in-95"
+          >
+            Copied!
+          </div>
+        )}
+        <Button type="button" variant="outline" className="gap-2" onClick={handleShare}>
+          <Share2 className="size-4" aria-hidden />
+          Share
+        </Button>
+      </div>
 
       <div className="mt-8 grid max-w-md grid-cols-2 gap-y-3 text-sm">
         <span className="text-neutral-500">Type</span>

@@ -158,7 +158,7 @@ function validateSessionFieldValues(fields: {
 
 sessionRouter.get('/', async (c) => {
   const {
-    status, venue_id, organizer_id, attendee_id,
+    status, id, name, venue_id, organizer_id, attendee_id,
     date_from, date_to, city, region, skill_min, skill_max,
   } = c.req.query();
 
@@ -179,6 +179,8 @@ sessionRouter.get('/', async (c) => {
 
   const filters: Parameters<typeof listSessions>[0] = {};
   if (status !== undefined) filters.status = status as SessionStatus;
+  if (id !== undefined) filters.id = id;
+  if (name !== undefined) filters.name = name;
   if (venue_id !== undefined) filters.venueId = venue_id;
   if (organizer_id !== undefined) filters.organizerId = organizer_id;
   if (date_from !== undefined) filters.dateFrom = date_from;
@@ -193,7 +195,8 @@ sessionRouter.get('/', async (c) => {
   // Resolve optional caller identity for privacy enforcement:
   // attendee_id — respects private-profile visibility
   // organizer_id — gates invite_only sessions to the organizer themselves
-  if (attendee_id !== undefined || organizer_id !== undefined) {
+  // id — gates an exact-id-matched invite_only session to authenticated callers
+  if (attendee_id !== undefined || organizer_id !== undefined || id !== undefined) {
     const requestingUserId = await getOptionalUserId(c);
     if (requestingUserId) filters.requestingUserId = requestingUserId;
   }

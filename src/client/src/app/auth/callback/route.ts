@@ -15,11 +15,14 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      // `next` is only ever explicitly set for the password-recovery flow
-      // (next=/reset-password) — respect it as-is there. Otherwise this is
-      // the Google sign-in/sign-up default, which needs the same
-      // onboarding-quiz gate the email/password login page applies.
-      if (next === DEFAULT_NEXT && !data.user?.app_metadata?.onboarding_completed) {
+      // `next` can be the default dashboard, a password-recovery redirect
+      // (next=/reset-password), or now an arbitrary same-origin page the user
+      // was trying to reach before being sent to log in (e.g. a shared
+      // session link — see login/page.tsx's `next` handling). Every case
+      // except password recovery needs the same onboarding-quiz gate the
+      // email/password login page applies — a brand-new Google user must
+      // finish onboarding before landing anywhere else, not just before /home.
+      if (!next.startsWith('/reset-password') && !data.user?.app_metadata?.onboarding_completed) {
         return NextResponse.redirect(`${origin}/onboarding/quiz`);
       }
       return NextResponse.redirect(`${origin}${next}`);

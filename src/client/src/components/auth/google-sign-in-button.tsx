@@ -35,17 +35,24 @@ function GoogleLogo() {
 // Google", "Continue with Google") — not a generic outline button/label.
 export function GoogleSignInButton({
   text = 'Continue with Google',
+  next,
 }: {
   text?: 'Sign in with Google' | 'Sign up with Google' | 'Continue with Google';
+  // Same-origin relative path to return to after auth — caller (login page)
+  // is responsible for validating it (see lib/safe-next-path.ts) since this
+  // component just forwards it into the callback URL.
+  next?: string | null;
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleClick() {
     setIsSubmitting(true);
     const supabase = createClient();
+    const callbackUrl = new URL('/auth/callback', window.location.origin);
+    if (next) callbackUrl.searchParams.set('next', next);
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: callbackUrl.toString() },
     });
   }
 
