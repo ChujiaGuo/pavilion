@@ -27,7 +27,7 @@ See `database-schema.md` for the full table definitions.
 | Database + Auth | Supabase (PostgreSQL) | See Supabase vs Firebase below |
 | Messaging | Stream Chat | Pre-built React components, handles realtime/push/storage |
 | Payments | Stripe | Deferred to v2 (see brainstorm.md Future Features Roadmap) — chosen now so the same provider can later handle both paid sessions and marketplace transactions |
-| Hosting | Railway or Render | Low ops overhead, managed Postgres option, easy to start |
+| Hosting | Render | Low ops overhead, easy to start; free tier suits low traffic while pre-revenue |
 
 ---
 
@@ -287,11 +287,11 @@ Implemented in `src/server/src/domains/rating/`. Core scoring (`computeRatingUpd
 
 ## Environments
 
-Two environments: local dev (Supabase CLI) and prod (Supabase cloud + Railway/Render).
+Two environments: local dev (Supabase CLI) and prod (Supabase cloud + Render).
 
 **Local dev:** `supabase start` spins up a full Postgres + Auth + Studio stack in Docker. URLs and keys are printed on startup — copy them into `src/client/.env.local` and `src/server/.env.local`. These files are gitignored.
 
-**Prod:** env vars live in the Railway/Render dashboard only, never in files. The prod Supabase project is linked once via `supabase link --project-ref <ref>`.
+**Prod:** env vars live in the Render dashboard only, never in files. The prod Supabase project is linked once via `supabase link --project-ref <ref>`.
 
 **Migration workflow:** see README.md "Database migrations" for the full command sequence.
 
@@ -299,7 +299,7 @@ Two environments: local dev (Supabase CLI) and prod (Supabase cloud + Railway/Re
 
 **RPC function grants — the opposite default from tables, and it doesn't inherit the grant above:** Postgres grants `EXECUTE` on a newly created function to `PUBLIC` by default, and `config.toml` exposes the `public` schema over PostgREST — so an un-revoked `SECURITY DEFINER` function is callable by `anon`/`authenticated` via `/rest/v1/rpc/<fn>` with just the anon key, bypassing whatever app-layer checks the caller assumed protected it. `20260701142827_lock_down_session_rpcs.sql` revokes `EXECUTE` on `join_session_atomic`, `cancel_rsvp_and_promote`, and `decrement_reliability_score` (see "RSVP & attendance concurrency safety" below) from `PUBLIC`/`anon`/`authenticated` and grants it only to `service_role`. This is a per-function grant, not schema-level — any new `SECURITY DEFINER` RPC needs its own explicit revoke/grant pair, the `ALTER DEFAULT PRIVILEGES` trick above only covers tables/sequences.
 
-**App deployment:** Railway/Render watches the repo and auto-deploys on push to `main`. No separate deploy step.
+**App deployment:** Render watches the repo and auto-deploys on push to `main`. No separate deploy step.
 
 ---
 
