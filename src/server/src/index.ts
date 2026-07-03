@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
 import { noStore } from './middleware/no-store.js';
+import { securityHeaders } from './middleware/security-headers.js';
 import { venueRouter } from './domains/venue/venue.router.js';
 import { sessionRouter } from './domains/session/session.router.js';
 import { userRouter } from './domains/user/user.router.js';
@@ -12,6 +13,7 @@ import { messagingRouter } from './domains/messaging/messaging.router.js';
 const app = new Hono();
 
 app.use(logger());
+app.use('*', securityHeaders);
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
