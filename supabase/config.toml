@@ -155,8 +155,16 @@ max_indexes = 5
 [auth]
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
-# in emails.
-site_url = "http://127.0.0.1:3000"
+# in emails — including the confirm-signup link (supabase/templates/confirm_signup.html builds
+# it from {{ .SiteURL }}, not a per-call redirectTo). Must be `localhost`, not `127.0.0.1`:
+# confirmed by testing that `next dev`'s Route Handlers always resolve `new URL(request.url).origin`
+# to the hostname the dev server was launched with (`localhost`) regardless of which host/IP the
+# request actually arrived on — so a 127.0.0.1 site_url makes /auth/confirm's session cookie land
+# on the wrong origin (127.0.0.1, matching the actual request) right before its own redirect sends
+# the browser to a *different* origin (localhost, per that always-localhost `origin`), losing the
+# cookie. `additional_redirect_urls` below is where 127.0.0.1 (and any other alias) still belongs —
+# see "Redirect URL allow-list needs a wildcard per non-site_url host" in technical-notes.md's "Auth".
+site_url = "http://localhost:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
@@ -232,7 +240,12 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+# Mirrors prod's Supabase dashboard setting (toggled on there, out of band —
+# config push doesn't touch it until this line matches, see the [auth.email]
+# comment in technical-notes.md's "Auth" section) so local dev exercises the
+# same confirm-email flow instead of masking it. Local confirmation emails
+# land in Mailpit at http://localhost:54324, same as password-reset links.
+enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = true
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
@@ -251,6 +264,18 @@ otp_expiry = 3600
 # pass = "env(SENDGRID_API_KEY)"
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
+
+# Confirm-signup template — content lives in supabase/templates/confirm_signup.html
+# (repo-relative, matching this key's own convention below), branded to match
+# design-system.md rather than GoTrue's plain default copy. The template links
+# to this app's own /auth/confirm route (token_hash + type=email) instead of
+# the default ConfirmationURL straight to GoTrue's hosted /verify endpoint —
+# see technical-notes.md "Auth" for why (PKCE code exchange doesn't survive
+# the link being opened in a different browser/device than the one that
+# signed up; verifyOtp with a token_hash does).
+[auth.email.template.confirmation]
+subject = "Confirm your Pavilion account"
+content_path = "./supabase/templates/confirm_signup.html"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]

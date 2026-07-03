@@ -60,7 +60,15 @@ function toRatingHistory(row: RatingHistoryRow): RatingHistory {
 // Reads
 // ---------------------------------------------------------------------------
 
-export async function getUserRatingDisplay(userId: string, requesterId: string): Promise<RatingDisplay | null> {
+// `bypassPrivacy` exists solely for the admin panel's raw-score fetch (see
+// rating.router.ts's GET /user/:userId?raw=true) — the caller must already
+// be confirmed admin+ before passing it, since this function has no role
+// check of its own.
+export async function getUserRatingDisplay(
+  userId: string,
+  requesterId: string,
+  opts?: { bypassPrivacy?: boolean },
+): Promise<RatingDisplay | null> {
   const { data, error } = await supabase
     .from('profiles')
     .select('internal_score, placement_sessions_remaining, privacy_level, verified_tier')
@@ -69,7 +77,7 @@ export async function getUserRatingDisplay(userId: string, requesterId: string):
     .single();
 
   if (error || !data) return null;
-  if (data.privacy_level === 'private' && userId !== requesterId) return null;
+  if (data.privacy_level === 'private' && userId !== requesterId && !opts?.bypassPrivacy) return null;
   return toRatingDisplay(data.internal_score, data.placement_sessions_remaining, data.verified_tier);
 }
 

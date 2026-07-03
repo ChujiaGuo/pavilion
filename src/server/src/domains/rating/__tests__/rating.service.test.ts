@@ -16,6 +16,8 @@ import {
   submitOnboardingQuiz,
   skipOnboarding,
   adminAdjustRating,
+  getUserRatingDisplay,
+  getRawScore,
 } from '../rating.service.js';
 import { computeOnboardingScore } from '../rating.algorithm.js';
 
@@ -493,6 +495,91 @@ const SESSION_ROW = { starts_at: '2020-01-01T00:00:00Z', status: 'completed' };
 const eligibleSessionChain = () => singleChain(SESSION_ROW);
 
 beforeEach(() => vi.clearAllMocks());
+
+// ---------------------------------------------------------------------------
+// getUserRatingDisplay
+// ---------------------------------------------------------------------------
+
+describe('getUserRatingDisplay', () => {
+  const OWNER_ID = 'owner-1';
+  const PROFILE_ROW = {
+    internal_score: 4.0,
+    placement_sessions_remaining: 0,
+    privacy_level: 'public',
+    verified_tier: null,
+  };
+
+  it('returns the display for a public profile viewed by anyone', async () => {
+    mockFrom.mockReturnValueOnce(singleChain(PROFILE_ROW));
+
+    const result = await getUserRatingDisplay(OWNER_ID, 'someone-else');
+    expect(result).not.toBeNull();
+  });
+
+  it('returns null when the profile does not exist', async () => {
+    mockFrom.mockReturnValueOnce(singleChain(null));
+
+    expect(await getUserRatingDisplay(OWNER_ID, 'someone-else')).toBeNull();
+  });
+
+  it('returns null for a private profile viewed by a non-owner', async () => {
+    mockFrom.mockReturnValueOnce(singleChain({ ...PROFILE_ROW, privacy_level: 'private' }));
+
+    expect(await getUserRatingDisplay(OWNER_ID, 'someone-else')).toBeNull();
+  });
+
+  it('returns the display for a private profile viewed by its owner', async () => {
+    mockFrom.mockReturnValueOnce(singleChain({ ...PROFILE_ROW, privacy_level: 'private' }));
+
+    expect(await getUserRatingDisplay(OWNER_ID, OWNER_ID)).not.toBeNull();
+  });
+
+  it('bypasses the privacy check for a non-owner when bypassPrivacy is set', async () => {
+    // The admin panel's raw-score path — see rating.router.ts — only passes
+    // this after independently confirming the caller is admin+.
+    mockFrom.mockReturnValueOnce(singleChain({ ...PROFILE_ROW, privacy_level: 'private' }));
+
+    const result = await getUserRatingDisplay(OWNER_ID, 'someone-else', { bypassPrivacy: true });
+    expect(result).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRawScore
+// ---------------------------------------------------------------------------
+
+describe('getRawScore', () => {
+  const CALLER_ID = 'caller-1';
+  const TARGET_ID = 'target-1';
+
+  it('returns forbidden when caller is below admin rank', async () => {
+    mockFrom.mockReturnValueOnce(singleChain({ role: 'moderator' })); // role check
+
+    const result = await getRawScore(CALLER_ID, TARGET_ID);
+    expect(result).toEqual({ ok: false, reason: 'forbidden' });
+  });
+
+  it('returns not_found when the target profile does not exist', async () => {
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'admin' })) // role check
+      .mockReturnValueOnce(singleChain(null)); // profile fetch fails
+
+    const result = await getRawScore(CALLER_ID, TARGET_ID);
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('returns the raw score for an admin caller regardless of the target\'s privacy level', async () => {
+    // getRawScore's own query never selects privacy_level — it was never
+    // privacy-gated at this layer; confirms the bug lived in the router's
+    // separate getUserRatingDisplay call, not here.
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'admin' })) // role check
+      .mockReturnValueOnce(singleChain({ internal_score: 6.42 })); // profile fetch
+
+    const result = await getRawScore(CALLER_ID, TARGET_ID);
+    expect(result).toEqual({ ok: true, rawScore: 6.42 });
+  });
+});
 
 describe('submitRating', () => {
   it('rejects an invalid vote without touching the database', async () => {

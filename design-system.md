@@ -39,6 +39,7 @@ Mobile-first responsive web — see `technical-notes.md`'s "Platform" section fo
 ## Typography
 
 - **Nunito** (via `next/font/google`), applied globally on `<body>` in `layout.tsx`. Rounded terminals give the friendly, casual-sport feel the app is going for, and it stays readable at body-copy sizes (unlike more decorative rounded fonts that only work as display type).
+- **The confirm-signup email (`supabase/templates/confirm_signup.html`) is a deliberate exception to the Tailwind/`next/font` system** — email clients don't run arbitrary CSS or load web fonts reliably, so it's hand-written table-based HTML with inline styles and a `'Nunito','Segoe UI',Helvetica,Arial,sans-serif` fallback stack instead of the actual Nunito font file. Colors/copy tone still match the app (`#2a6f41` primary, the same "Get started" eyebrow-label pattern as signup/login) — only the implementation technique differs. Follow this same table+inline-style approach for any future transactional email; don't try to reuse the web app's component/Tailwind system for one.
 
 ---
 

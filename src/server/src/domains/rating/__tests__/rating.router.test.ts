@@ -12,6 +12,7 @@ vi.mock('../../../lib/supabase.js', () => ({
 vi.mock('../rating.service.js', () => ({
   getUserRatingDisplay: vi.fn(),
   getRatingHistory: vi.fn(),
+  getRawScore: vi.fn(),
   submitRating: vi.fn(),
   submitOnboardingQuiz: vi.fn(),
   skipOnboarding: vi.fn(),
@@ -22,6 +23,7 @@ import { supabase } from '../../../lib/supabase.js';
 import {
   getUserRatingDisplay,
   getRatingHistory,
+  getRawScore,
   submitRating,
   submitOnboardingQuiz,
   skipOnboarding,
@@ -32,6 +34,7 @@ import { ratingRouter } from '../rating.router.js';
 const mockGetUser = vi.mocked(supabase.auth.getUser);
 const mockGetUserRatingDisplay = vi.mocked(getUserRatingDisplay);
 const mockGetRatingHistory = vi.mocked(getRatingHistory);
+const mockGetRawScore = vi.mocked(getRawScore);
 const mockSubmitRating = vi.mocked(submitRating);
 const mockSubmitOnboardingQuiz = vi.mocked(submitOnboardingQuiz);
 const mockSkipOnboarding = vi.mocked(skipOnboarding);
@@ -180,6 +183,57 @@ describe('GET /user/:userId', () => {
     mockGetUserRatingDisplay.mockResolvedValue(null);
     const res = await ratingRouter.request(`/user/${USER_ID}`, { headers: withAuth() });
     expect(res.status).toBe(404);
+  });
+
+  describe('?raw=true', () => {
+    it('returns 403 when the caller is not admin+, without ever calling getUserRatingDisplay', async () => {
+      mockGetRawScore.mockResolvedValue({ ok: false, reason: 'forbidden' });
+      const res = await ratingRouter.request(`/user/${USER_ID}?raw=true`, { headers: withAuth() });
+      expect(res.status).toBe(403);
+      expect(mockGetUserRatingDisplay).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the target user does not exist', async () => {
+      mockGetRawScore.mockResolvedValue({ ok: false, reason: 'not_found' });
+      const res = await ratingRouter.request(`/user/${USER_ID}?raw=true`, { headers: withAuth('admin-1') });
+      expect(res.status).toBe(404);
+    });
+
+    it('returns the rating and raw score for an admin caller', async () => {
+      mockGetRawScore.mockResolvedValue({ ok: true, rawScore: 6.42 });
+      mockGetUserRatingDisplay.mockResolvedValue(RATING_DISPLAY);
+
+      const res = await ratingRouter.request(`/user/${USER_ID}?raw=true`, { headers: withAuth('admin-1') });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ userId: USER_ID, rating: RATING_DISPLAY, rawScore: 6.42 });
+    });
+
+    it('bypasses the private-profile check for a confirmed admin caller — the bug this covers', async () => {
+      // Regression coverage: the admin user panel previously 404'd here for
+      // private profiles because getUserRatingDisplay was called without
+      // bypassPrivacy, before ever reaching the admin-gated raw-score check.
+      mockGetRawScore.mockResolvedValue({ ok: true, rawScore: 6.42 });
+      mockGetUserRatingDisplay.mockResolvedValue(RATING_DISPLAY);
+
+      const res = await ratingRouter.request(`/user/${USER_ID}?raw=true`, { headers: withAuth('admin-1') });
+      expect(res.status).toBe(200);
+      expect(mockGetUserRatingDisplay).toHaveBeenCalledWith(USER_ID, 'admin-1', { bypassPrivacy: true });
+    });
+
+    it('still 404s if the profile disappears between the raw-score check and the display fetch', async () => {
+      mockGetRawScore.mockResolvedValue({ ok: true, rawScore: 6.42 });
+      mockGetUserRatingDisplay.mockResolvedValue(null);
+
+      const res = await ratingRouter.request(`/user/${USER_ID}?raw=true`, { headers: withAuth('admin-1') });
+      expect(res.status).toBe(404);
+    });
+
+    it('does not bypass privacy on the non-raw path', async () => {
+      mockGetUserRatingDisplay.mockResolvedValue(RATING_DISPLAY);
+      await ratingRouter.request(`/user/${USER_ID}`, { headers: withAuth('someone-else') });
+      expect(mockGetUserRatingDisplay).toHaveBeenCalledWith(USER_ID, 'someone-else');
+      expect(mockGetRawScore).not.toHaveBeenCalled();
+    });
   });
 });
 

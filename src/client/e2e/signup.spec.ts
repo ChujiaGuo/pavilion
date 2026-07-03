@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { supabaseAdmin } from './helpers/supabase-admin';
 
-test('creates an account, sets display name/first name/last name/city, and redirects home', async ({
+test('creates an account and saves display name/first name/last name/city on the profile', async ({
   page,
 }) => {
   const email = `e2e-signup-${randomUUID()}@example.test`;
@@ -21,9 +21,13 @@ test('creates an account, sets display name/first name/last name/city, and redir
 
   const res = await signupResponse;
   expect(res.status()).toBe(200);
-  const userId: string = (await res.json()).user.id;
+  const userId: string = (await res.json()).id;
 
-  await page.waitForURL('/onboarding/quiz');
+  // Email confirmation is required (supabase/config.toml's enable_confirmations),
+  // so signUp() returns no session — the profile row is still populated
+  // immediately, though, since handle_new_user fires unconditionally on the
+  // auth.users insert. See verify-email.spec.ts for the confirm-link round trip.
+  await page.waitForURL(/\/verify-email/);
 
   const { data: profile, error } = await supabaseAdmin
     .from('profiles')
@@ -55,9 +59,9 @@ test('creates an account when first/last name are left blank', async ({ page }) 
 
   const res = await signupResponse;
   expect(res.status()).toBe(200);
-  const userId: string = (await res.json()).user.id;
+  const userId: string = (await res.json()).id;
 
-  await page.waitForURL('/onboarding/quiz');
+  await page.waitForURL(/\/verify-email/);
 
   const { data: profile, error } = await supabaseAdmin
     .from('profiles')

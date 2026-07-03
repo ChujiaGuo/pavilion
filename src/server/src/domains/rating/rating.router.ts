@@ -43,18 +43,23 @@ ratingRouter.post('/submit', auth, async (c) => {
 
 ratingRouter.get('/user/:userId', auth, async (c) => {
   const userId = c.req.param('userId');
-  const rating = await getUserRatingDisplay(userId, c.get('userId'));
-  if (!rating) return c.json({ error: 'Not found' }, 404);
 
-  // ?raw=true — admin+ only, used by the admin adjust-rating UI, which
+  // ?raw=true — admin+ only, used by the admin user-edit panel, which
   // already lets an admin set the raw score directly and shouldn't have to
-  // work backward from the derived grade to know the current one.
+  // work backward from the derived grade to know the current one. getRawScore
+  // gates on admin role first; only once that's confirmed do we bypass the
+  // private-profile check for the display too, so an admin can see a private
+  // user's rating from that panel — everywhere else, privacy still applies.
   if (c.req.query('raw') === 'true') {
     const result = await getRawScore(c.get('userId'), userId);
     if (!result.ok) return c.json({ error: result.reason }, result.reason === 'forbidden' ? 403 : 404);
+    const rating = await getUserRatingDisplay(userId, c.get('userId'), { bypassPrivacy: true });
+    if (!rating) return c.json({ error: 'Not found' }, 404);
     return c.json({ userId, rating, rawScore: result.rawScore });
   }
 
+  const rating = await getUserRatingDisplay(userId, c.get('userId'));
+  if (!rating) return c.json({ error: 'Not found' }, 404);
   return c.json({ userId, rating });
 });
 

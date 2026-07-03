@@ -9,8 +9,6 @@ import { Button } from '@/components/ui/button';
 import { RequiredMarker } from '@/components/ui/required-marker';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { createClient } from '@/lib/supabase/client';
-import { apiPatch } from '@/lib/api';
-import type { User } from '@pavilion/types';
 
 const content = 'relative mx-auto px-6 sm:px-12 lg:w-2/3 lg:px-0';
 
@@ -31,10 +29,24 @@ export default function SignupPage() {
     setIsSubmitting(true);
 
     const supabase = createClient();
+    // city/firstName/lastName ride along in signUp's metadata rather than a
+    // follow-up PATCH — handle_new_user (supabase/migrations) reads them off
+    // raw_user_meta_data when it creates the profile row, which fires
+    // unconditionally on signup regardless of whether email confirmation is
+    // required. A follow-up PATCH would need the fresh session's access
+    // token, which doesn't exist yet when confirmation is pending (data.session
+    // is null below) — see technical-notes.md "Auth".
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { display_name: displayName } },
+      options: {
+        data: {
+          display_name: displayName,
+          city,
+          ...(firstName && { first_name: firstName }),
+          ...(lastName && { last_name: lastName }),
+        },
+      },
     });
 
     if (signUpError) {
@@ -43,20 +55,12 @@ export default function SignupPage() {
       return;
     }
 
-    const accessToken = data.session?.access_token;
-    const userId = data.user?.id;
-
-    if (accessToken && userId) {
-      try {
-        await apiPatch<User>(`/api/users/${userId}`, accessToken, {
-          city,
-          ...(firstName && { firstName }),
-          ...(lastName && { lastName }),
-        });
-      } catch {
-        // Account was created successfully; profile polish (city) can be retried
-        // later from account settings, so this shouldn't block onboarding.
-      }
+    if (!data.session) {
+      // Email confirmation required (prod today, and local dev now mirrors
+      // it — see supabase/config.toml's enable_confirmations) — no session
+      // was issued, so there's nothing to onboard yet.
+      router.replace(`/verify-email?email=${encodeURIComponent(email)}`);
+      return;
     }
 
     router.replace('/onboarding/quiz');

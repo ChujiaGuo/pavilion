@@ -38,6 +38,13 @@ function LoginForm() {
     const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (signInError) {
+      // Surface this as the same "check your inbox" flow signup lands on,
+      // rather than a raw "Email not confirmed" API error string — the fix
+      // is a resend link, not a password retry. See technical-notes.md "Auth".
+      if (signInError.code === 'email_not_confirmed') {
+        router.replace(`/verify-email?email=${encodeURIComponent(email)}`);
+        return;
+      }
       setError(signInError.message);
       setIsSubmitting(false);
       return;
