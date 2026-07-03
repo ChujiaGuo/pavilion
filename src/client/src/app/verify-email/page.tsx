@@ -30,7 +30,7 @@ function VerifyEmailContent() {
     const { error: resendError } = await supabase.auth.resend({
       type: 'signup',
       email,
-      options: { emailRedirectTo: `${window.location.origin}/login` },
+      options: { emailRedirectTo: `${window.location.origin}/email-confirmed` },
     });
 
     setIsSubmitting(false);

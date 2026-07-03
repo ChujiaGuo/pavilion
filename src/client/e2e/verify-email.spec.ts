@@ -3,11 +3,10 @@ import { test, expect } from '@playwright/test';
 import { supabaseAdmin } from './helpers/supabase-admin';
 import { waitForEmailLink } from './helpers/mailpit';
 
-test('signing up, confirming via the emailed link, and logging in reaches onboarding', async ({
+test('signing up, confirming via the emailed link, and continuing reaches onboarding', async ({
   page,
 }) => {
   const email = `e2e-verify-${randomUUID()}@example.test`;
-  const password = 'password123';
   const signupResponse = page.waitForResponse(
     (res) => res.url().includes('/auth/v1/signup') && res.request().method() === 'POST'
   );
@@ -16,7 +15,7 @@ test('signing up, confirming via the emailed link, and logging in reaches onboar
   await page.fill('#displayName', 'Verify Test User');
   await page.fill('#email', email);
   await page.fill('#city', 'Baltimore');
-  await page.fill('#password', password);
+  await page.fill('#password', 'password123');
   await page.getByRole('button', { name: 'Create account' }).click();
 
   const userId: string = (await (await signupResponse).json()).id;
@@ -30,27 +29,23 @@ test('signing up, confirming via the emailed link, and logging in reaches onboar
   // supabase/config.toml's commented-out [auth.email.template.confirmation]
   // and technical-notes.md "Auth" for why (free-tier plan restriction). The
   // default template's link goes to GoTrue's own hosted /verify endpoint,
-  // which always confirms the account server-side before redirecting —
-  // independent of the /auth/confirm route this app built for the branded
-  // template (covered separately below via a direct route hit, since
-  // nothing in the real flow reaches it while the template stays inactive).
-  // signup/page.tsx's emailRedirectTo sends the post-confirm redirect to
-  // /login rather than the bare marketing page.
+  // which always confirms the account server-side before redirecting to
+  // signup/page.tsx's emailRedirectTo (/email-confirmed) with an implicit-flow
+  // #access_token=... fragment — which that page's own createClient() call
+  // picks up automatically, same end state as the dormant /auth/confirm path
+  // (covered separately below via a direct route hit) just reached differently.
   const confirmLink = await waitForEmailLink(email);
   await page.goto(confirmLink);
-  await page.waitForURL(/\/login/);
+  await page.waitForURL('/email-confirmed');
+  await expect(page.getByRole('heading', { name: 'Email confirmed' })).toBeVisible();
 
   const { data: userData, error } = await supabaseAdmin.auth.admin.getUserById(userId);
   expect(error).toBeNull();
   expect(userData.user?.email_confirmed_at).not.toBeNull();
 
-  // Confirming doesn't itself establish a usable app session (GoTrue's
-  // default template redirects with an implicit-flow hash fragment nothing
-  // on this page consumes) — logging in normally is how a real user
-  // actually gets in once /login is reached this way.
-  await page.fill('#email', email);
-  await page.fill('#password', password);
-  await page.getByRole('button', { name: 'Log in' }).click();
+  await page.getByRole('link', { name: 'Continue to Pavilion' }).click();
+  // /home's own auth guard bounces a not-yet-onboarded user onward — same
+  // pattern /reset-password's post-update redirect relies on.
   await page.waitForURL('/onboarding/quiz');
 
   await supabaseAdmin.auth.admin.deleteUser(userId);
