@@ -189,6 +189,18 @@ export default function SignupPage() {
             <Button type="submit" disabled={isSubmitting} className="h-10 w-full">
               {isSubmitting ? 'Creating account…' : 'Create account'}
             </Button>
+
+            <p className="text-xs text-neutral-500">
+              By creating an account, you agree to our{' '}
+              <Link href="/terms" className="font-medium text-primary hover:underline">
+                Terms of Service
+              </Link>{' '}
+              and{' '}
+              <Link href="/privacy" className="font-medium text-primary hover:underline">
+                Privacy Policy
+              </Link>
+              .
+            </p>
           </form>
 
           <div className="mt-6 flex max-w-md items-center gap-4 text-xs uppercase tracking-[0.15em] text-neutral-400">

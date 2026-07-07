@@ -138,6 +138,12 @@ The server (`@pavilion/server`) deploys to Render; the client (`@pavilion/client
 
 Prod env vars never go in files — each service's own hosting dashboard only (Render for the server, Vercel for the client).
 
+### Inviting users during an invite-only beta
+
+To gate prod signups before public launch, turn off **Authentication → Sign In / Providers → Allow new users to sign up** in the Supabase dashboard (blocks email and Google OAuth signups alike; existing users can still log in). Note this setting lives only in the dashboard — it's not mirrored in `supabase/config.toml`'s `[remotes.production.auth]`, so a `supabase config push` for something unrelated will silently flip it back on (same `[auth]`-section-pushed-wholesale gotcha as step 8 above); re-check the toggle after any push while the beta gate is active.
+
+To let someone in while the toggle is off, use `npm run invite:prod --workspace=server -- <email>` (see `src/server/src/scripts/invite-user.ts`) — it calls the Admin API's `generateLink` (type `invite`) and prints the link instead of emailing it, so you can hand-deliver it yourself. Requires a `src/server/.env.prod.local` (gitignored via `.env*.local`, never commit it) with prod's `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` — both from the Supabase dashboard's Settings → API (or copy `SUPABASE_SERVICE_ROLE_KEY` from Render's env vars, where it's already set for the server).
+
 ## Stack
 
 | Layer | Choice |

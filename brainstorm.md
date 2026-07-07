@@ -289,3 +289,11 @@ Everything not in MVP Scope (v1) below lives here. `technical-notes.md` only doc
 - [ ] What cities/regions are the target launch markets?
 - [ ] How is venue data seeded at launch — manual entry, community sourcing, or outreach to clubs?
 - [ ] Expand to other racket sports eventually (pickleball, squash, tennis)?
+
+## Pre-Launch Legal Checklist
+
+- [x] Draft Terms of Service and Privacy Policy — `/terms` and `/privacy` pages added, linked from signup and the landing page footer. Template-based; fine to keep as-is except the Assumption of Risk clause in Terms (in-person session liability warrants a real lawyer pass before public launch, unlike the rest of the boilerplate).
+- [ ] Fill in placeholders before going live: operator/legal entity name, contact email, governing-law state/country, effective date (currently bracketed in both pages)
+- [ ] Decide minimum account age (currently drafted as 18+ — revisit if a lower age is wanted)
+- [ ] Lawyer review of the Assumption of Risk clause (`/terms` section 5) specifically — real-world meetup liability, not generic SaaS boilerplate
+- [ ] Add a signup consent checkbox if a jurisdiction we launch in requires explicit opt-in (vs. the current "by creating an account, you agree" implied-consent pattern)

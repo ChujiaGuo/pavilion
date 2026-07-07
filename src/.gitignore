@@ -15,3 +15,9 @@ dist/
 
 _tmp_screenshot.mjs
 _tmp_screenshot_admin_venues.mjs
+
+# Local-only prod-admin scripts — operate directly on prod via the
+# service-role key, not meant to be shared/committed (see README.md
+# "Inviting users during an invite-only beta")
+server/src/scripts/invite-user.ts
+server/src/scripts/make-owner.ts

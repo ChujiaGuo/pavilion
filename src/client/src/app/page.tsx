@@ -174,6 +174,20 @@ export default function Home() {
             Get Started
           </a>
         </div>
+
+        <div
+          className={`mt-24 flex flex-col gap-3 border-t border-white/15 pt-6 text-sm text-white/60 sm:flex-row sm:items-center sm:justify-between ${content}`}
+        >
+          <span>&copy; {new Date().getFullYear()} Pavilion</span>
+          <div className="flex gap-6">
+            <a href="/terms" className="hover:text-white">
+              Terms of Service
+            </a>
+            <a href="/privacy" className="hover:text-white">
+              Privacy Policy
+            </a>
+          </div>
+        </div>
       </section>
     </main>
   );
