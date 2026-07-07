@@ -21,6 +21,7 @@ export async function deleteFixtureUser(userId: string) {
 
 type SessionOverrides = Partial<{
   venue_name: string;
+  venue_id: string;
   visibility: 'public' | 'invite_only';
   status: 'upcoming' | 'active' | 'completed' | 'cancelled';
   skill_min: number;

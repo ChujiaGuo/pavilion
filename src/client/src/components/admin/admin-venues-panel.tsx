@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { apiGet, apiPost, apiPatch } from '@/lib/api';
+import { VenueAddressAutocomplete } from './venue-address-autocomplete';
 import type { Venue, VenueType, SurfaceType, ShuttleType } from '@pavilion/types';
 
 const VENUE_TYPE_OPTIONS: { id: VenueType; label: string }[] = [
@@ -80,12 +81,14 @@ function VenueFormFields({
   fields,
   setFields,
   idPrefix,
-  includeLatLng,
+  useAddressAutocomplete,
+  accessToken,
 }: {
   fields: FormFields;
   setFields: (fields: FormFields) => void;
   idPrefix: string;
-  includeLatLng: boolean;
+  useAddressAutocomplete: boolean;
+  accessToken: string;
 }) {
   return (
     <>
@@ -95,6 +98,7 @@ function VenueFormFields({
           id={`${idPrefix}-name`}
           value={fields.name}
           onChange={(e) => setFields({ ...fields, name: e.target.value })}
+          required
         />
       </div>
 
@@ -114,11 +118,33 @@ function VenueFormFields({
 
       <div className="space-y-2">
         <Label htmlFor={`${idPrefix}-address`}>Address</Label>
-        <Input
-          id={`${idPrefix}-address`}
-          value={fields.address}
-          onChange={(e) => setFields({ ...fields, address: e.target.value })}
-        />
+        {useAddressAutocomplete ? (
+          <VenueAddressAutocomplete
+            accessToken={accessToken}
+            id={`${idPrefix}-address`}
+            value={fields.address}
+            onChange={(address) => setFields({ ...fields, address })}
+            onPlaceSelected={(details) =>
+              setFields({
+                ...fields,
+                address: details.address,
+                city: details.city,
+                region: details.region,
+                lat: String(details.lat),
+                lng: String(details.lng),
+              })
+            }
+            className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm"
+            required
+          />
+        ) : (
+          <Input
+            id={`${idPrefix}-address`}
+            value={fields.address}
+            onChange={(e) => setFields({ ...fields, address: e.target.value })}
+            required
+          />
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -140,31 +166,6 @@ function VenueFormFields({
         </div>
       </div>
 
-      {includeLatLng && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor={`${idPrefix}-lat`}>Latitude</Label>
-            <Input
-              id={`${idPrefix}-lat`}
-              type="number"
-              step="any"
-              value={fields.lat}
-              onChange={(e) => setFields({ ...fields, lat: e.target.value })}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={`${idPrefix}-lng`}>Longitude</Label>
-            <Input
-              id={`${idPrefix}-lng`}
-              type="number"
-              step="any"
-              value={fields.lng}
-              onChange={(e) => setFields({ ...fields, lng: e.target.value })}
-            />
-          </div>
-        </div>
-      )}
-
       <div className="space-y-2">
         <Label htmlFor={`${idPrefix}-courtCount`}>Court count</Label>
         <Input
@@ -173,6 +174,7 @@ function VenueFormFields({
           min="1"
           value={fields.courtCount}
           onChange={(e) => setFields({ ...fields, courtCount: e.target.value })}
+          required
         />
       </div>
 
@@ -316,7 +318,13 @@ export function AdminVenuesPanel({ accessToken }: { accessToken: string }) {
 
       {isCreating && (
         <form onSubmit={handleCreate} className="max-w-sm space-y-4 border-b border-border pb-6">
-          <VenueFormFields fields={createFields} setFields={setCreateFields} idPrefix="create" includeLatLng />
+          <VenueFormFields
+            fields={createFields}
+            setFields={setCreateFields}
+            idPrefix="create"
+            useAddressAutocomplete
+            accessToken={accessToken}
+          />
           <div className="flex items-center gap-3">
             <Button type="submit" disabled={isSaving}>
               {isSaving ? 'Creating…' : 'Create venue'}
@@ -349,7 +357,8 @@ export function AdminVenuesPanel({ accessToken }: { accessToken: string }) {
                     fields={editFields}
                     setFields={setEditFields}
                     idPrefix={`edit-${venue.id}`}
-                    includeLatLng={false}
+                    useAddressAutocomplete={false}
+                    accessToken={accessToken}
                   />
                   <div className="flex items-center gap-3">
                     <Button type="submit" disabled={isSaving}>

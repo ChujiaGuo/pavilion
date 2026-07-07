@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../../lib/supabase.js', () => ({
   supabase: {
     from: vi.fn(),
+    rpc: vi.fn(),
     auth: { getUser: vi.fn() },
   },
 }));
@@ -38,6 +39,13 @@ function makeChain() {
 }
 
 const mockFrom = vi.mocked(supabase.from);
+
+// supabase.rpc(...) chains .limit() (see listVenues's near-search path) --
+// this makes the mock awaitable via .limit() rather than .rpc() itself,
+// mirroring makeChain()'s shape for .select()-based queries.
+function mockRpcResult(value: any) {
+  return { limit: vi.fn().mockResolvedValue(value) };
+}
 
 const VENUE_ROW = {
   id: 'venue-1',
@@ -176,6 +184,85 @@ describe('listVenues', () => {
 
     await listVenues({ dropInAvailable: true });
     expect(chain['eq']).toHaveBeenCalledWith('drop_in_available', true);
+  });
+
+  it('passes the name filter as an ILIKE match', async () => {
+    const chain = makeChain();
+    chain.resolveAs({ data: [], error: null });
+    mockFrom.mockReturnValue(chain);
+    chain['ilike'] = vi.fn(() => chain);
+
+    await listVenues({ name: 'Riverside' });
+    expect(chain['ilike']).toHaveBeenCalledWith('name', '%Riverside%');
+  });
+
+  it('calls the nearby_venues RPC with miles converted to meters when near is provided', async () => {
+    const mockRpc = vi.mocked(supabase.rpc);
+    const rpcResult = mockRpcResult({ data: [], error: null });
+    mockRpc.mockReturnValue(rpcResult as any);
+
+    await listVenues({ near: { lat: 49.28, lng: -123.12, radiusMiles: 25 } });
+
+    expect(mockRpc).toHaveBeenCalledWith('nearby_venues', {
+      p_lat: 49.28,
+      p_lng: -123.12,
+      p_radius_meters: 25 * 1609.34,
+      p_name: null,
+      p_type: null,
+      p_drop_in: null,
+    });
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it('caps the nearby_venues RPC at 50 rows, matching the other unpaginated-search limits', async () => {
+    const mockRpc = vi.mocked(supabase.rpc);
+    const rpcResult = mockRpcResult({ data: [], error: null });
+    mockRpc.mockReturnValue(rpcResult as any);
+
+    await listVenues({ near: { lat: 49.28, lng: -123.12, radiusMiles: 25 } });
+
+    expect(rpcResult.limit).toHaveBeenCalledWith(50);
+  });
+
+  it('forwards name/type/dropInAvailable alongside near to the RPC', async () => {
+    const mockRpc = vi.mocked(supabase.rpc);
+    mockRpc.mockReturnValue(mockRpcResult({ data: [], error: null }) as any);
+
+    await listVenues({
+      name: 'Riverside',
+      type: 'club',
+      dropInAvailable: true,
+      near: { lat: 49.28, lng: -123.12, radiusMiles: 10 },
+    });
+
+    expect(mockRpc).toHaveBeenCalledWith(
+      'nearby_venues',
+      expect.objectContaining({ p_name: 'Riverside', p_type: 'club', p_drop_in: true }),
+    );
+  });
+
+  it('maps nearby_venues rows into Venue objects with distanceMiles, and no hours', async () => {
+    const mockRpc = vi.mocked(supabase.rpc);
+    const { venue_hours: _venueHours, ...rowWithoutHours } = VENUE_ROW;
+    void _venueHours;
+    mockRpc.mockReturnValue(
+      mockRpcResult({
+        data: [{ ...rowWithoutHours, distance_meters: 1609.34 * 2 }],
+        error: null,
+      }) as any,
+    );
+
+    const venues = await listVenues({ near: { lat: 49.28, lng: -123.12, radiusMiles: 25 } });
+    expect(venues).toHaveLength(1);
+    expect(venues[0]).toMatchObject({ id: 'venue-1', distanceMiles: 2 });
+    expect(venues[0].hours).toEqual([]);
+  });
+
+  it('returns an empty array when the RPC errors', async () => {
+    const mockRpc = vi.mocked(supabase.rpc);
+    mockRpc.mockReturnValue(mockRpcResult({ data: null, error: new Error('RPC error') }) as any);
+
+    expect(await listVenues({ near: { lat: 49.28, lng: -123.12, radiusMiles: 25 } })).toEqual([]);
   });
 });
 

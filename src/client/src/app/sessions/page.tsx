@@ -50,11 +50,18 @@ export default function SessionsPage() {
       .then(({ rating }) => {
         const defaults = computeDefaultSkillRange(rating.grade);
         setSkillDefaults(defaults);
-        setAppliedFilters({ search: '', dateFrom: todayIso(), dateTo: '', ...defaults });
+        setAppliedFilters({ search: '', dateFrom: todayIso(), dateTo: '', venueId: '', venueName: '', ...defaults });
       })
       .catch(() => {
         setSkillDefaults(FALLBACK_SKILL_RANGE);
-        setAppliedFilters({ search: '', dateFrom: todayIso(), dateTo: '', ...FALLBACK_SKILL_RANGE });
+        setAppliedFilters({
+          search: '',
+          dateFrom: todayIso(),
+          dateTo: '',
+          venueId: '',
+          venueName: '',
+          ...FALLBACK_SKILL_RANGE,
+        });
       });
   }, [auth]);
 
@@ -71,6 +78,7 @@ export default function SessionsPage() {
       if (search) params.set(isSessionId(search) ? 'id' : 'name', search);
       if (appliedFilters.skillMin) params.set('skill_min', appliedFilters.skillMin);
       if (appliedFilters.skillMax) params.set('skill_max', appliedFilters.skillMax);
+      if (appliedFilters.venueId) params.set('venue_id', appliedFilters.venueId);
       if (appliedFilters.dateFrom) params.set('date_from', new Date(appliedFilters.dateFrom).toISOString());
       if (appliedFilters.dateTo) params.set('date_to', endOfDayIso(appliedFilters.dateTo));
     }
@@ -136,7 +144,12 @@ export default function SessionsPage() {
       {tab === 'browse' && (
         <div className="mt-6">
           {appliedFilters && skillDefaults ? (
-            <SessionFilters value={appliedFilters} skillDefaults={skillDefaults} onApply={setAppliedFilters} />
+            <SessionFilters
+              value={appliedFilters}
+              skillDefaults={skillDefaults}
+              onApply={setAppliedFilters}
+              accessToken={auth.accessToken}
+            />
           ) : (
             <p className="text-sm text-neutral-500">Loading filters…</p>
           )}

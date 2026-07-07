@@ -2,6 +2,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { RequiredMarker } from '@/components/ui/required-marker';
 import { StartsAtPicker } from './starts-at-picker';
+import { VenuePicker } from '@/components/venue/venue-picker';
 import type { SessionType, SessionFormat, SessionVisibility, ShuttlePolicy } from '@pavilion/types';
 import {
   SESSION_TYPE_LABELS,
@@ -17,6 +18,12 @@ import { fieldClassName, labelClassName } from './field-styles';
 // Number/datetime inputs are kept as strings here and parsed by the caller on
 // submit — avoids NaN churn while the user is mid-edit of a numeric field.
 export interface SessionFormValues {
+  // Empty string means no real venue is associated -- an "unofficial venue"
+  // per brainstorm.md, where the organizer posts the venue name directly and
+  // no venue listing is needed. Only ever set in 'create' mode via
+  // VenuePicker below; SessionUpdateFields excludes venueId server-side, so
+  // 'edit' mode never touches it (see session-form-fields.tsx's mode prop).
+  venueId: string;
   venueName: string;
   type: SessionType;
   format: SessionFormat;
@@ -40,6 +47,7 @@ export interface SessionFormValues {
 // defaults to tomorrow evening (see defaultStartsAtLocal) rather than empty.
 export function emptySessionFormValues(): SessionFormValues {
   return {
+    venueId: '',
     venueName: '',
     type: 'drop_in',
     format: 'casual_rotation',
@@ -84,6 +92,9 @@ interface SessionFormFieldsProps {
   mode: 'create' | 'edit';
   values: SessionFormValues;
   onChange: (patch: Partial<SessionFormValues>) => void;
+  // Only needed for the create-mode VenuePicker's venue search calls --
+  // 'edit' mode's callers may pass it too, since it's unused there.
+  accessToken: string;
 }
 
 // Shared field set for /sessions/new and the inline edit form on
@@ -98,7 +109,7 @@ interface SessionFormFieldsProps {
 // "Session details" section up top; every numeric/text/date field follows in
 // a "Logistics" section below — a deliberate split, not an incidental one,
 // so all the multiple-choice taps happen before any typing/scrolling starts.
-export function SessionFormFields({ mode, values, onChange }: SessionFormFieldsProps) {
+export function SessionFormFields({ mode, values, onChange, accessToken }: SessionFormFieldsProps) {
   return (
     <div className="space-y-8">
       <p className="flex items-center gap-1.5 text-xs text-neutral-500">
@@ -203,15 +214,28 @@ export function SessionFormFields({ mode, values, onChange }: SessionFormFieldsP
             Venue name
             <RequiredMarker />
           </label>
-          <input
-            id="venueName"
-            type="text"
-            required
-            placeholder="e.g. Riverside Community Center"
-            value={values.venueName}
-            onChange={(e) => onChange({ venueName: e.target.value })}
-            className={fieldClassName}
-          />
+          {mode === 'create' ? (
+            <VenuePicker
+              accessToken={accessToken}
+              allowFreeText
+              id="venueName"
+              placeholder="Search venues, or type your own"
+              required
+              className={fieldClassName}
+              value={{ venueId: values.venueId || null, venueName: values.venueName }}
+              onChange={({ venueId, venueName }) => onChange({ venueId: venueId ?? '', venueName })}
+            />
+          ) : (
+            <input
+              id="venueName"
+              type="text"
+              required
+              placeholder="e.g. Riverside Community Center"
+              value={values.venueName}
+              onChange={(e) => onChange({ venueName: e.target.value })}
+              className={fieldClassName}
+            />
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">

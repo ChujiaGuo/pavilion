@@ -15,6 +15,7 @@ import {
 import { cn } from '@/lib/utils';
 import { formatDateRangeSummary } from '@/lib/session-format';
 import { fieldClassName, labelClassName } from './field-styles';
+import { VenuePicker } from '@/components/venue/venue-picker';
 
 // How long to let typing/adjustments settle before re-fetching — one timer
 // shared across every field (search, date, skill) so a burst of edits across
@@ -28,6 +29,11 @@ export interface BrowseFilters {
   dateTo: string;
   skillMin: string;
   skillMax: string;
+  // venueId is the actual filter value (empty = no venue filter); venueName
+  // is a display label only, never sent to the server -- see VenuePicker's
+  // allowFreeText={false} mode.
+  venueId: string;
+  venueName: string;
 }
 
 export interface SkillDefaults {
@@ -41,9 +47,10 @@ const pillTriggerClassName =
 interface SkillFilterFieldsProps {
   draft: BrowseFilters;
   onChange: (patch: Partial<BrowseFilters>) => void;
+  accessToken: string;
 }
 
-function SkillFilterFields({ draft, onChange }: SkillFilterFieldsProps) {
+function SkillFilterFields({ draft, onChange, accessToken }: SkillFilterFieldsProps) {
   return (
     <div className="space-y-6">
       <div>
@@ -73,6 +80,20 @@ function SkillFilterFields({ draft, onChange }: SkillFilterFieldsProps) {
           className={fieldClassName}
         />
       </div>
+      <div>
+        <label htmlFor="filter-venue" className={labelClassName}>
+          Venue
+        </label>
+        <VenuePicker
+          accessToken={accessToken}
+          allowFreeText={false}
+          id="filter-venue"
+          placeholder="Search venues"
+          className={fieldClassName}
+          value={{ venueId: draft.venueId || null, venueName: draft.venueName }}
+          onChange={({ venueId, venueName }) => onChange({ venueId: venueId ?? '', venueName })}
+        />
+      </div>
     </div>
   );
 }
@@ -83,6 +104,7 @@ interface SessionFiltersProps {
    * `computeDefaultSkillRange` — used by "Reset to defaults", not a global constant. */
   skillDefaults: SkillDefaults;
   onApply: (filters: BrowseFilters) => void;
+  accessToken: string;
 }
 
 // City and Date are the primary, always-visible interactions (per
@@ -101,13 +123,14 @@ interface SessionFiltersProps {
 // filter set that's already been applied (true on mount, and right after
 // Reset, which applies synchronously) — otherwise the debounce would still
 // fire once more with an identical, redundant request.
-export function SessionFilters({ value, skillDefaults, onApply }: SessionFiltersProps) {
+export function SessionFilters({ value, skillDefaults, onApply, accessToken }: SessionFiltersProps) {
   const [draft, setDraft] = useState<BrowseFilters>(value);
   const [isOpen, setIsOpen] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 640px)', { noSsr: true });
   const lastAppliedRef = useRef(JSON.stringify(value));
 
-  const hasNarrowedSkill = draft.skillMin !== skillDefaults.skillMin || draft.skillMax !== skillDefaults.skillMax;
+  const hasNarrowedSkill =
+    draft.skillMin !== skillDefaults.skillMin || draft.skillMax !== skillDefaults.skillMax || draft.venueId !== '';
   // YYYY-MM-DD strings compare correctly lexicographically — no Date parsing needed.
   const isDateRangeInvalid = draft.dateFrom !== '' && draft.dateTo !== '' && draft.dateTo < draft.dateFrom;
 
@@ -127,7 +150,13 @@ export function SessionFilters({ value, skillDefaults, onApply }: SessionFilters
   }
 
   function handleReset() {
-    const reset: BrowseFilters = { ...draft, skillMin: skillDefaults.skillMin, skillMax: skillDefaults.skillMax };
+    const reset: BrowseFilters = {
+      ...draft,
+      skillMin: skillDefaults.skillMin,
+      skillMax: skillDefaults.skillMax,
+      venueId: '',
+      venueName: '',
+    };
     lastAppliedRef.current = JSON.stringify(reset);
     setDraft(reset);
     onApply(reset);
@@ -211,7 +240,7 @@ export function SessionFilters({ value, skillDefaults, onApply }: SessionFilters
                     className="w-72 origin-(--transform-origin) rounded-lg bg-popover p-4 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
                     <p className="text-sm font-semibold uppercase tracking-[0.15em] text-neutral-500">More filters</p>
                     <div className="mt-4">
-                      <SkillFilterFields draft={draft} onChange={handleDraftChange} />
+                      <SkillFilterFields draft={draft} onChange={handleDraftChange} accessToken={accessToken} />
                     </div>
                     <div className="mt-6 flex items-center justify-between">
                       <button
@@ -246,7 +275,7 @@ export function SessionFilters({ value, skillDefaults, onApply }: SessionFilters
                     <DrawerDescription>Narrow sessions down by skill level.</DrawerDescription>
                   </DrawerHeader>
                   <div className="flex-1 overflow-y-auto px-4 py-4">
-                    <SkillFilterFields draft={draft} onChange={handleDraftChange} />
+                    <SkillFilterFields draft={draft} onChange={handleDraftChange} accessToken={accessToken} />
                   </div>
                   <DrawerFooter className="flex-row items-center justify-between">
                     <button

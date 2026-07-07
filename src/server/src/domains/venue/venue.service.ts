@@ -24,6 +24,22 @@ type VenueRow = {
   venue_hours: { day_of_week: number; open_time: string; close_time: string }[];
 };
 
+// Shape returned by the nearby_venues RPC (see the migration of the same
+// name) — every venues column plus a computed distance_meters, and no
+// venue_hours embed (PostgREST RPC results aren't relational embeds the way
+// a plain table select is, and the listing view this backs doesn't need
+// per-day hours anyway — see venue.service.ts's listVenues).
+type NearbyVenueRow = Omit<VenueRow, 'venue_hours'> & { distance_meters: number };
+
+const METERS_PER_MILE = 1609.34;
+
+// Same 50-row cap already used for other unpaginated searches
+// (session.service.ts's ADMIN_SEARCH_LIMIT, user.service.ts's
+// SEARCH_RESULT_LIMIT) -- nearby_venues has no pagination UI in v1, so an
+// unbounded radius (up to MAX_RADIUS_MILES in venue.router.ts) shouldn't be
+// able to pull back an unbounded row count.
+const NEARBY_VENUES_LIMIT = 50;
+
 export type VenueCreateFields = {
   name: string;
   type: Venue['type'];
@@ -45,9 +61,15 @@ export type VenueCreateFields = {
 export type VenueUpdateFields = Partial<Omit<VenueCreateFields, 'lat' | 'lng'>>;
 
 export type VenueListFilters = {
+  name?: string;
   city?: string;
   type?: Venue['type'];
   dropInAvailable?: boolean;
+  // Activates the nearby_venues RPC path instead of the plain filtered
+  // select — see listVenues below. city is still accepted above but isn't
+  // combined with near-search: a radius is already more precise than a city
+  // match, so when both are present near wins and city is ignored.
+  near?: { lat: number; lng: number; radiusMiles: number };
 };
 
 function toVenue(row: VenueRow): Venue {
@@ -75,6 +97,13 @@ function toVenue(row: VenueRow): Venue {
     })),
     claimedByAccountId: row.claimed_by_account_id,
     createdAt: row.created_at,
+  };
+}
+
+function toVenueWithDistance(row: NearbyVenueRow): Venue {
+  return {
+    ...toVenue({ ...row, venue_hours: [] }),
+    distanceMiles: row.distance_meters / METERS_PER_MILE,
   };
 }
 
@@ -125,8 +154,24 @@ export async function getVenueById(id: string): Promise<Venue | null> {
 }
 
 export async function listVenues(filters: VenueListFilters = {}): Promise<Venue[]> {
+  if (filters.near) {
+    const { data, error } = await supabase
+      .rpc('nearby_venues', {
+        p_lat: filters.near.lat,
+        p_lng: filters.near.lng,
+        p_radius_meters: filters.near.radiusMiles * METERS_PER_MILE,
+        p_name: filters.name ?? null,
+        p_type: filters.type ?? null,
+        p_drop_in: filters.dropInAvailable ?? null,
+      })
+      .limit(NEARBY_VENUES_LIMIT);
+    if (error || !data) return [];
+    return (data as NearbyVenueRow[]).map(toVenueWithDistance);
+  }
+
   let query = supabase.from('venues').select(VENUE_SELECT);
 
+  if (filters.name) query = query.ilike('name', `%${filters.name}%`);
   if (filters.city) query = query.eq('city', filters.city);
   if (filters.type) query = query.eq('type', filters.type);
   if (filters.dropInAvailable !== undefined) query = query.eq('drop_in_available', filters.dropInAvailable);

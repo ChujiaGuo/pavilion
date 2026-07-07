@@ -40,6 +40,7 @@ const HOURS_12_MS = 12 * 60 * 60 * 1000;
 
 function sessionToFormValues(session: Session): SessionFormValues {
   return {
+    venueId: '',
     venueName: session.venueName,
     type: session.type,
     format: session.format,
@@ -487,6 +488,7 @@ export default function SessionDetailPage() {
                 mode="edit"
                 values={editValues}
                 onChange={(patch) => setEditValues((prev) => (prev ? { ...prev, ...patch } : prev))}
+                accessToken={auth.accessToken}
               />
               {editError && <p className="mt-4 text-sm text-destructive">{editError}</p>}
               <div className="mt-6 flex gap-3">

@@ -18,6 +18,16 @@ vi.mock('../venue.service.js', () => ({
   submitEditSuggestion: vi.fn(),
 }));
 
+vi.mock('../venue.places.js', () => ({
+  autocompleteAddress: vi.fn(),
+  getPlaceDetails: vi.fn(),
+}));
+
+vi.mock('../../../lib/admin.js', () => ({
+  getAdminRole: vi.fn(),
+  roleAtLeast: vi.fn(),
+}));
+
 import { supabase } from '../../../lib/supabase.js';
 import {
   getVenueById,
@@ -27,6 +37,8 @@ import {
   claimVenue,
   submitEditSuggestion,
 } from '../venue.service.js';
+import { autocompleteAddress, getPlaceDetails } from '../venue.places.js';
+import { getAdminRole, roleAtLeast } from '../../../lib/admin.js';
 import { venueRouter } from '../venue.router.js';
 
 const mockGetUser = vi.mocked(supabase.auth.getUser);
@@ -36,6 +48,10 @@ const mockCreateVenue = vi.mocked(createVenue);
 const mockUpdateVenue = vi.mocked(updateVenue);
 const mockClaimVenue = vi.mocked(claimVenue);
 const mockSubmitEditSuggestion = vi.mocked(submitEditSuggestion);
+const mockAutocompleteAddress = vi.mocked(autocompleteAddress);
+const mockGetPlaceDetails = vi.mocked(getPlaceDetails);
+const mockGetAdminRole = vi.mocked(getAdminRole);
+const mockRoleAtLeast = vi.mocked(roleAtLeast);
 
 const VENUE_ID = 'venue-1';
 const USER_ID = 'user-1';
@@ -134,6 +150,152 @@ describe('GET /', () => {
     const res = await venueRouter.request('/?type=arbitrary_string');
     expect(res.status).toBe(400);
     expect(mockListVenues).not.toHaveBeenCalled();
+  });
+
+  it('passes the name query param through to listVenues', async () => {
+    mockListVenues.mockResolvedValue([]);
+    await venueRouter.request('/?name=Riverside');
+    expect(mockListVenues).toHaveBeenCalledWith(expect.objectContaining({ name: 'Riverside' }));
+  });
+
+  it('activates near when lat/lng/radius_miles are all present', async () => {
+    mockListVenues.mockResolvedValue([]);
+    await venueRouter.request('/?lat=49.28&lng=-123.12&radius_miles=25');
+    expect(mockListVenues).toHaveBeenCalledWith(
+      expect.objectContaining({ near: { lat: 49.28, lng: -123.12, radiusMiles: 25 } })
+    );
+  });
+
+  it('returns 400 when only some of lat/lng/radius_miles are provided', async () => {
+    const res = await venueRouter.request('/?lat=49.28&lng=-123.12');
+    expect(res.status).toBe(400);
+    expect(mockListVenues).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when lat is not a number', async () => {
+    const res = await venueRouter.request('/?lat=notanumber&lng=-123.12&radius_miles=25');
+    expect(res.status).toBe(400);
+    expect(mockListVenues).not.toHaveBeenCalled();
+  });
+
+  it('leaves near undefined when none of lat/lng/radius_miles are provided', async () => {
+    mockListVenues.mockResolvedValue([]);
+    await venueRouter.request('/');
+    expect(mockListVenues).toHaveBeenCalledWith(expect.objectContaining({ near: undefined }));
+  });
+
+  it.each([
+    ['lat above 90', 'lat=90.1&lng=-123.12&radius_miles=25'],
+    ['lat below -90', 'lat=-90.1&lng=-123.12&radius_miles=25'],
+    ['lng above 180', 'lat=49.28&lng=180.1&radius_miles=25'],
+    ['lng below -180', 'lat=49.28&lng=-180.1&radius_miles=25'],
+    ['radius_miles of 0', 'lat=49.28&lng=-123.12&radius_miles=0'],
+    ['radius_miles negative', 'lat=49.28&lng=-123.12&radius_miles=-5'],
+    ['radius_miles above the 100mi max', 'lat=49.28&lng=-123.12&radius_miles=101'],
+  ])('returns 400 for %s, without calling listVenues', async (_label, qs) => {
+    const res = await venueRouter.request(`/?${qs}`);
+    expect(res.status).toBe(400);
+    expect(mockListVenues).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['lat at the 90 boundary', 'lat=90&lng=-123.12&radius_miles=25'],
+    ['lat at the -90 boundary', 'lat=-90&lng=-123.12&radius_miles=25'],
+    ['lng at the 180 boundary', 'lat=49.28&lng=180&radius_miles=25'],
+    ['radius_miles at the 100mi max', 'lat=49.28&lng=-123.12&radius_miles=100'],
+  ])('accepts %s', async (_label, qs) => {
+    mockListVenues.mockResolvedValue([]);
+    const res = await venueRouter.request(`/?${qs}`);
+    expect(res.status).toBe(200);
+    expect(mockListVenues).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /places/autocomplete
+// ---------------------------------------------------------------------------
+
+describe('GET /places/autocomplete', () => {
+  it('returns 401 when no Authorization header is present', async () => {
+    const res = await venueRouter.request('/places/autocomplete?input=123+Main&sessiontoken=tok');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 403 when the caller is below venue_verifier', async () => {
+    mockGetAdminRole.mockResolvedValue(null);
+    mockRoleAtLeast.mockReturnValue(false);
+    const res = await venueRouter.request('/places/autocomplete?input=123+Main&sessiontoken=tok', {
+      headers: withAuth(),
+    });
+    expect(res.status).toBe(403);
+    expect(mockAutocompleteAddress).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when input or sessiontoken is missing', async () => {
+    mockGetAdminRole.mockResolvedValue('venue_verifier');
+    mockRoleAtLeast.mockReturnValue(true);
+    const res = await venueRouter.request('/places/autocomplete?input=123+Main', { headers: withAuth() });
+    expect(res.status).toBe(400);
+    expect(mockAutocompleteAddress).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 with the autocomplete result for a venue_verifier+ caller', async () => {
+    mockGetAdminRole.mockResolvedValue('venue_verifier');
+    mockRoleAtLeast.mockReturnValue(true);
+    mockAutocompleteAddress.mockResolvedValue({
+      configured: true,
+      suggestions: [{ placeId: 'place-1', text: '123 Main St, Vancouver, BC' }],
+    });
+    const res = await venueRouter.request('/places/autocomplete?input=123+Main&sessiontoken=tok', {
+      headers: withAuth(),
+    });
+    expect(res.status).toBe(200);
+    expect(mockAutocompleteAddress).toHaveBeenCalledWith('123 Main', 'tok');
+    expect((await res.json()).suggestions).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /places/details
+// ---------------------------------------------------------------------------
+
+describe('GET /places/details', () => {
+  it('returns 401 when no Authorization header is present', async () => {
+    const res = await venueRouter.request('/places/details?placeId=place-1&sessiontoken=tok');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 403 when the caller is below venue_verifier', async () => {
+    mockGetAdminRole.mockResolvedValue(null);
+    mockRoleAtLeast.mockReturnValue(false);
+    const res = await venueRouter.request('/places/details?placeId=place-1&sessiontoken=tok', {
+      headers: withAuth(),
+    });
+    expect(res.status).toBe(403);
+    expect(mockGetPlaceDetails).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when placeId or sessiontoken is missing', async () => {
+    mockGetAdminRole.mockResolvedValue('venue_verifier');
+    mockRoleAtLeast.mockReturnValue(true);
+    const res = await venueRouter.request('/places/details?placeId=place-1', { headers: withAuth() });
+    expect(res.status).toBe(400);
+    expect(mockGetPlaceDetails).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 with the place details for a venue_verifier+ caller', async () => {
+    mockGetAdminRole.mockResolvedValue('venue_verifier');
+    mockRoleAtLeast.mockReturnValue(true);
+    mockGetPlaceDetails.mockResolvedValue({
+      configured: true,
+      details: { address: '123 Main St', city: 'Vancouver', region: 'BC', lat: 49.28, lng: -123.12 },
+    });
+    const res = await venueRouter.request('/places/details?placeId=place-1&sessiontoken=tok', {
+      headers: withAuth(),
+    });
+    expect(res.status).toBe(200);
+    expect(mockGetPlaceDetails).toHaveBeenCalledWith('place-1', 'tok');
+    expect((await res.json()).details).toMatchObject({ city: 'Vancouver' });
   });
 });
 

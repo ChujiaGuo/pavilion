@@ -66,6 +66,16 @@ Email/password auth works out of the box. Google is scaffolded in code (see `tec
 
 **⚠️ `supabase/config.toml` is committed to git — step 3 is not a personal setting.** Flipping `enabled = true` and committing it turns Google sign-in on for every teammate and CI run, not just your machine. If they don't also have the two env vars from step 2 available wherever they run `supabase start`, their local stack breaks on a setting they never asked to enable. Don't commit `enabled = true` until the credentials are distributed somewhere every developer/CI can reach (a shared secrets manager, CI secret store, etc.) — if you're only testing locally, flip it back to `false` before committing.
 
+## Enabling venue address autocomplete (optional)
+
+The admin panel's venue-creation address field works fine without this — it's a plain text input until a key is configured. Adding a key turns it into a Google Places (New)-backed autocomplete that fills in address/city/region/lat/lng from a selected suggestion:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), enable the **Places API (New)** for your project and create an API key. Restrict it to that API (and, for prod, to your server's IP/referrer) rather than leaving it unrestricted.
+2. Set `GOOGLE_PLACES_API_KEY` in `src/server/.env.local` (see `.env.example`). No client-side env var needed — the key stays server-side; the browser only ever talks to this app's own `/api/venues/places/*` proxy endpoints, never Google directly.
+3. Restart the server dev process (`tsx watch` doesn't need a full restart for env changes picked up via `.env.local`, but confirm the new value is loaded if autocomplete still shows no suggestions).
+
+Without a key, `GET /api/venues/places/autocomplete`/`/places/details` both return `{ configured: false }` and the client never shows a spinner or "no results" state — it just behaves like an ordinary text field. See `technical-notes.md` "Session & Venue" for the endpoint/session-token details.
+
 ## Database migrations
 
 ```bash
@@ -89,6 +99,18 @@ npm run seed:admins --workspace=server     # same prerequisites as seed:sessions
 ```
 
 Creates one account per admin role for manually testing `/admin` (see `technical-notes.md`'s "Admin & Roles"): `testvenue@example.test` (`venue_verifier`), `testmod@example.test` (`moderator`), `testadmin@example.test` (`admin`), `testowner@example.test` (`owner`) — all password `password`. Safe to re-run, same delete-and-recreate pattern as `seed:sessions`. See `src/server/src/scripts/seed-admins.ts`.
+
+```bash
+npm run seed:venues --workspace=server     # same prerequisites as seed:sessions
+```
+
+Creates seven mock venues (all `[SEED]`-prefixed names) spanning every `type`/`surface_type`/`shuttle_type` value, a mix of drop-in/reservation-required and populated/null contact fields, and full `venue_hours` spreads (including a 24/7-ish club and a daylight-only outdoor court). Six cluster around Rockville/Bethesda, MD to match `seed:sessions`' mock users; one sits in Fairfax, VA, well outside that cluster, for exercising the `nearby_venues` radius filter's exclusion side. Safe to re-run, same delete-and-recreate pattern as `seed:sessions` (matched by the `[SEED]` name prefix instead of emails). See `src/server/src/scripts/seed-venues.ts`.
+
+```bash
+npm run seed:all --workspace=server        # runs seed:admins, then seed:sessions, then seed:venues
+```
+
+The three scripts don't reference each other's data (independent tables/emails), so this is just a convenience wrapper — equivalent to running all three individually in any order.
 
 ## Testing
 

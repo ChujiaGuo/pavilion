@@ -35,6 +35,7 @@ export default function NewSessionPage() {
 
     try {
       const result = await apiPost<CreateResponse>('/api/sessions', auth.accessToken, {
+        venueId: values.venueId || undefined,
         venueName: values.venueName,
         type: values.type,
         format: values.format,
@@ -85,7 +86,7 @@ export default function NewSessionPage() {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="mt-8 max-w-md">
-          <SessionFormFields mode="create" values={values} onChange={handleChange} />
+          <SessionFormFields mode="create" values={values} onChange={handleChange} accessToken={auth.accessToken} />
 
           {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 

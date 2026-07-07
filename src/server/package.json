@@ -13,7 +13,9 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "demo:rating": "tsx src/domains/rating/rating.demo.ts",
     "seed:sessions": "tsx --env-file=.env.local src/scripts/seed-sessions.ts",
-    "seed:admins": "tsx --env-file=.env.local src/scripts/seed-admins.ts"
+    "seed:admins": "tsx --env-file=.env.local src/scripts/seed-admins.ts",
+    "seed:venues": "tsx --env-file=.env.local src/scripts/seed-venues.ts",
+    "seed:all": "npm run seed:admins && npm run seed:sessions && npm run seed:venues"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.4",

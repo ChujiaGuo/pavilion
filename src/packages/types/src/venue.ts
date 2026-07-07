@@ -28,4 +28,8 @@ export interface Venue {
   hours: VenueHours[];
   claimedByAccountId: string | null;
   createdAt: string;
+  // Only populated when returned from the nearby_venues RPC path (GET
+  // /api/venues?lat=&lng=&radius_miles=) -- see venue.service.ts's listVenues.
+  // Omitted/undefined for a plain (non-distance) venue listing.
+  distanceMiles?: number;
 }
