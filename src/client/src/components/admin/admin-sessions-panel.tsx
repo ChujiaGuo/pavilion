@@ -5,7 +5,8 @@ import { ChevronRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { apiGet, apiPatch, apiDelete, apiPost } from '@/lib/api';
+import { RequiredMarker } from '@/components/ui/required-marker';
+import { apiGet, apiPatch, apiDelete, apiPost, apiErrorMessage } from '@/lib/api';
 import { SESSION_STATUS_LABELS } from '@/lib/session-format';
 import { cn } from '@/lib/utils';
 import type { Session, SessionRsvp, SessionStatus } from '@pavilion/types';
@@ -95,8 +96,8 @@ export function AdminSessionsPanel({ accessToken }: { accessToken: string }) {
       });
       refreshOne(updated);
       setEditingId(null);
-    } catch {
-      setActionError('Failed to save changes.');
+    } catch (err) {
+      setActionError(apiErrorMessage(err, 'Failed to save changes.'));
     } finally {
       setIsSaving(false);
     }
@@ -170,31 +171,46 @@ export function AdminSessionsPanel({ accessToken }: { accessToken: string }) {
           <li key={session.id}>
             {editingId === session.id && fields ? (
               <form onSubmit={handleSave} className="max-w-sm space-y-4 py-4">
+                <p className="flex items-center gap-1.5 text-xs text-neutral-500">
+                  <RequiredMarker /> indicates a required field
+                </p>
                 <div className="space-y-2">
-                  <Label htmlFor={`venueName-${session.id}`}>Venue name</Label>
+                  <Label htmlFor={`venueName-${session.id}`}>
+                    Venue name
+                    <RequiredMarker />
+                  </Label>
                   <Input
                     id={`venueName-${session.id}`}
+                    required
                     value={fields.venueName}
                     onChange={(e) => setFields({ ...fields, venueName: e.target.value })}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor={`skillMin-${session.id}`}>Skill min</Label>
+                    <Label htmlFor={`skillMin-${session.id}`}>
+                      Skill min
+                      <RequiredMarker />
+                    </Label>
                     <Input
                       id={`skillMin-${session.id}`}
                       type="number"
                       step="0.25"
+                      required
                       value={fields.skillMin}
                       onChange={(e) => setFields({ ...fields, skillMin: e.target.value })}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor={`skillMax-${session.id}`}>Skill max</Label>
+                    <Label htmlFor={`skillMax-${session.id}`}>
+                      Skill max
+                      <RequiredMarker />
+                    </Label>
                     <Input
                       id={`skillMax-${session.id}`}
                       type="number"
                       step="0.25"
+                      required
                       value={fields.skillMax}
                       onChange={(e) => setFields({ ...fields, skillMax: e.target.value })}
                     />
@@ -202,19 +218,29 @@ export function AdminSessionsPanel({ accessToken }: { accessToken: string }) {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor={`courtCount-${session.id}`}>Court count</Label>
+                    <Label htmlFor={`courtCount-${session.id}`}>
+                      Court count
+                      <RequiredMarker />
+                    </Label>
                     <Input
                       id={`courtCount-${session.id}`}
                       type="number"
+                      min="1"
+                      required
                       value={fields.courtCount}
                       onChange={(e) => setFields({ ...fields, courtCount: e.target.value })}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor={`maxPlayers-${session.id}`}>Max players</Label>
+                    <Label htmlFor={`maxPlayers-${session.id}`}>
+                      Max players
+                      <RequiredMarker />
+                    </Label>
                     <Input
                       id={`maxPlayers-${session.id}`}
                       type="number"
+                      min="1"
+                      required
                       value={fields.maxPlayers}
                       onChange={(e) => setFields({ ...fields, maxPlayers: e.target.value })}
                     />

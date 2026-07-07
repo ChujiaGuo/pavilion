@@ -1,12 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { Popover as PopoverPrimitive } from '@base-ui/react';
+import { ChevronRight, Clock } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { apiGet, apiPost, apiPatch } from '@/lib/api';
+import { RequiredMarker } from '@/components/ui/required-marker';
+import { apiGet, apiPost, apiPatch, apiErrorMessage } from '@/lib/api';
+import { QUICK_TIMES, formatTimeLabel } from '@/lib/time-of-day';
+import { cn } from '@/lib/utils';
 import { VenueAddressAutocomplete } from './venue-address-autocomplete';
 import type { Venue, VenueType, SurfaceType, ShuttleType } from '@pavilion/types';
 
@@ -30,6 +34,28 @@ const SHUTTLE_TYPE_OPTIONS: { id: ShuttleType; label: string }[] = [
   { id: 'both', label: 'Both' },
 ];
 
+// Matches venues/[id]/page.tsx's DAY_LABELS -- dayOfWeek 0 = Sunday.
+const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+interface DayHoursField {
+  dayOfWeek: number;
+  isOpen: boolean;
+  openTime: string;
+  closeTime: string;
+}
+
+const DEFAULT_OPEN_TIME = '09:00';
+const DEFAULT_CLOSE_TIME = '17:00';
+
+function emptyHours(): DayHoursField[] {
+  return DAY_LABELS.map((_, dayOfWeek) => ({
+    dayOfWeek,
+    isOpen: false,
+    openTime: DEFAULT_OPEN_TIME,
+    closeTime: DEFAULT_CLOSE_TIME,
+  }));
+}
+
 interface FormFields {
   name: string;
   type: VenueType;
@@ -43,6 +69,10 @@ interface FormFields {
   shuttleType: ShuttleType;
   dropInAvailable: boolean;
   reservationRequired: boolean;
+  contactPhone: string;
+  contactWebsite: string;
+  bookingUrl: string;
+  hours: DayHoursField[];
 }
 
 const EMPTY_FORM: FormFields = {
@@ -58,9 +88,16 @@ const EMPTY_FORM: FormFields = {
   shuttleType: 'feather',
   dropInAvailable: false,
   reservationRequired: false,
+  contactPhone: '',
+  contactWebsite: '',
+  bookingUrl: '',
+  hours: emptyHours(),
 };
 
 function toFormFields(venue: Venue): FormFields {
+  // "09:00:00" -> "09:00" -- <input type="time">'s value must be HH:MM,
+  // while the DB (and API) round-trips HH:MM:SS.
+  const hoursByDay = new Map(venue.hours.map((h) => [h.dayOfWeek as number, h]));
   return {
     name: venue.name,
     type: venue.type,
@@ -74,7 +111,132 @@ function toFormFields(venue: Venue): FormFields {
     shuttleType: venue.shuttleType,
     dropInAvailable: venue.dropInAvailable,
     reservationRequired: venue.reservationRequired,
+    contactPhone: venue.contactPhone ?? '',
+    contactWebsite: venue.contactWebsite ?? '',
+    bookingUrl: venue.bookingUrl ?? '',
+    hours: DAY_LABELS.map((_, dayOfWeek) => {
+      const existing = hoursByDay.get(dayOfWeek);
+      return existing
+        ? { dayOfWeek, isOpen: true, openTime: existing.openTime.slice(0, 5), closeTime: existing.closeTime.slice(0, 5) }
+        : { dayOfWeek, isOpen: false, openTime: DEFAULT_OPEN_TIME, closeTime: DEFAULT_CLOSE_TIME };
+    }),
   };
+}
+
+// Shared by handleCreate/handleSaveEdit -- lat/lng are omitted since the
+// create path sends them separately (parsed to numbers) and the update path
+// never sends them at all (venue.service.ts's VenueUpdateFields excludes
+// them; a venue's location isn't editable after creation).
+function toApiPayload(fields: FormFields) {
+  return {
+    name: fields.name,
+    type: fields.type,
+    address: fields.address,
+    city: fields.city,
+    region: fields.region,
+    courtCount: Number(fields.courtCount),
+    surfaceType: fields.surfaceType,
+    shuttleType: fields.shuttleType,
+    dropInAvailable: fields.dropInAvailable,
+    reservationRequired: fields.reservationRequired,
+    contactPhone: fields.contactPhone.trim() || null,
+    contactWebsite: fields.contactWebsite.trim() || null,
+    bookingUrl: fields.bookingUrl.trim() || null,
+    hours: fields.hours
+      .filter((h) => h.isOpen)
+      .map((h) => ({ dayOfWeek: h.dayOfWeek, openTime: h.openTime, closeTime: h.closeTime })),
+  };
+}
+
+function updateDayHours(
+  fields: FormFields,
+  setFields: (fields: FormFields) => void,
+  dayOfWeek: number,
+  patch: Partial<DayHoursField>,
+) {
+  setFields({
+    ...fields,
+    hours: fields.hours.map((d) => (d.dayOfWeek === dayOfWeek ? { ...d, ...patch } : d)),
+  });
+}
+
+// Quick-tap time pills in a popover, matching starts-at-picker.tsx's "Starts
+// at" time selector (see /sessions/new) -- a compact trigger keeps 7 rows of
+// open/close pairs from turning into a wall of buttons, only expanding into
+// the pill picker when the admin actually wants to change one.
+function TimeOfDayPicker({
+  value,
+  onChange,
+  disabled,
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  ariaLabel: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const triggerClassName =
+    'flex h-8 items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent px-2 text-sm outline-none disabled:opacity-40';
+
+  if (disabled) {
+    return (
+      <span className={cn(triggerClassName, 'text-neutral-400')} aria-label={ariaLabel}>
+        {formatTimeLabel(value)}
+        <Clock className="size-3.5 shrink-0" aria-hidden />
+      </span>
+    );
+  }
+
+  return (
+    <PopoverPrimitive.Root open={isOpen} onOpenChange={setIsOpen}>
+      <PopoverPrimitive.Trigger
+        aria-label={ariaLabel}
+        className={cn(triggerClassName, 'cursor-pointer text-neutral-900')}
+      >
+        {formatTimeLabel(value)}
+        <Clock className="size-3.5 shrink-0 text-neutral-400" aria-hidden />
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Positioner side="bottom" align="start" sideOffset={8} className="z-50">
+          <PopoverPrimitive.Popup
+            data-testid={`${ariaLabel}-popup`}
+            className="w-64 origin-(--transform-origin) rounded-lg bg-popover p-3 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+          >
+            <div className="flex flex-wrap gap-2">
+              {QUICK_TIMES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    onChange(t);
+                    setIsOpen(false);
+                  }}
+                  className={cn(
+                    'rounded-full border px-3 py-1.5 text-sm font-medium transition-colors',
+                    value === t
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-neutral-600 hover:bg-muted',
+                  )}
+                >
+                  {formatTimeLabel(t)}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3">
+              <label className="text-xs font-normal text-neutral-400">Or pick an exact time</label>
+              <input
+                type="time"
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className="mt-1 h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none"
+              />
+            </div>
+          </PopoverPrimitive.Popup>
+        </PopoverPrimitive.Positioner>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  );
 }
 
 function VenueFormFields({
@@ -93,7 +255,10 @@ function VenueFormFields({
   return (
     <>
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-name`}>Name</Label>
+        <Label htmlFor={`${idPrefix}-name`}>
+          Name
+          <RequiredMarker />
+        </Label>
         <Input
           id={`${idPrefix}-name`}
           value={fields.name}
@@ -117,7 +282,10 @@ function VenueFormFields({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-address`}>Address</Label>
+        <Label htmlFor={`${idPrefix}-address`}>
+          Address
+          <RequiredMarker />
+        </Label>
         {useAddressAutocomplete ? (
           <VenueAddressAutocomplete
             accessToken={accessToken}
@@ -134,6 +302,15 @@ function VenueFormFields({
                 lng: String(details.lng),
               })
             }
+            // Moves focus off the address field the instant a suggestion is
+            // picked, landing on court count -- city/region are already
+            // auto-filled from the selected place, so that's the next field
+            // the admin actually needs to touch. Moving focus also stops the
+            // address value change from re-triggering the debounced
+            // autocomplete search for text that's already resolved, which
+            // would otherwise waste a billed Places call (see
+            // venue-address-autocomplete.tsx).
+            onSelect={() => document.getElementById(`${idPrefix}-courtCount`)?.focus()}
             className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm"
             required
           />
@@ -149,25 +326,36 @@ function VenueFormFields({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor={`${idPrefix}-city`}>City</Label>
+          <Label htmlFor={`${idPrefix}-city`}>
+            City
+            <RequiredMarker />
+          </Label>
           <Input
             id={`${idPrefix}-city`}
             value={fields.city}
             onChange={(e) => setFields({ ...fields, city: e.target.value })}
+            required
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor={`${idPrefix}-region`}>State</Label>
+          <Label htmlFor={`${idPrefix}-region`}>
+            State
+            <RequiredMarker />
+          </Label>
           <Input
             id={`${idPrefix}-region`}
             value={fields.region}
             onChange={(e) => setFields({ ...fields, region: e.target.value })}
+            required
           />
         </div>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-courtCount`}>Court count</Label>
+        <Label htmlFor={`${idPrefix}-courtCount`}>
+          Court count
+          <RequiredMarker />
+        </Label>
         <Input
           id={`${idPrefix}-courtCount`}
           type="number"
@@ -232,6 +420,71 @@ function VenueFormFields({
           Reservation required
         </label>
       </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}-contactPhone`}>Contact phone</Label>
+        <Input
+          id={`${idPrefix}-contactPhone`}
+          value={fields.contactPhone}
+          onChange={(e) => setFields({ ...fields, contactPhone: e.target.value })}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}-contactWebsite`}>Contact website</Label>
+        <Input
+          id={`${idPrefix}-contactWebsite`}
+          type="url"
+          value={fields.contactWebsite}
+          onChange={(e) => setFields({ ...fields, contactWebsite: e.target.value })}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}-bookingUrl`}>Booking URL</Label>
+        <Input
+          id={`${idPrefix}-bookingUrl`}
+          type="url"
+          value={fields.bookingUrl}
+          onChange={(e) => setFields({ ...fields, bookingUrl: e.target.value })}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Hours</Label>
+        <div className="space-y-1.5">
+          {fields.hours.map((day) => (
+            <div key={day.dayOfWeek} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                className="size-4 shrink-0 accent-primary"
+                id={`${idPrefix}-hours-${day.dayOfWeek}`}
+                checked={day.isOpen}
+                onChange={(e) => updateDayHours(fields, setFields, day.dayOfWeek, { isOpen: e.target.checked })}
+              />
+              <Label
+                htmlFor={`${idPrefix}-hours-${day.dayOfWeek}`}
+                className="w-24 shrink-0 font-normal"
+              >
+                {DAY_LABELS[day.dayOfWeek]}
+              </Label>
+              <TimeOfDayPicker
+                value={day.openTime}
+                disabled={!day.isOpen}
+                ariaLabel={`${DAY_LABELS[day.dayOfWeek]} open time`}
+                onChange={(openTime) => updateDayHours(fields, setFields, day.dayOfWeek, { openTime })}
+              />
+              <span className="text-sm text-neutral-400">–</span>
+              <TimeOfDayPicker
+                value={day.closeTime}
+                disabled={!day.isOpen}
+                ariaLabel={`${DAY_LABELS[day.dayOfWeek]} close time`}
+                onChange={(closeTime) => updateDayHours(fields, setFields, day.dayOfWeek, { closeTime })}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
     </>
   );
 }
@@ -262,16 +515,15 @@ export function AdminVenuesPanel({ accessToken }: { accessToken: string }) {
     setIsSaving(true);
     try {
       await apiPost('/api/venues', accessToken, {
-        ...createFields,
+        ...toApiPayload(createFields),
         lat: Number(createFields.lat),
         lng: Number(createFields.lng),
-        courtCount: Number(createFields.courtCount),
       });
       setCreateFields(EMPTY_FORM);
       setIsCreating(false);
       loadVenues();
-    } catch {
-      setError('Failed to create venue.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to create venue.'));
     } finally {
       setIsSaving(false);
     }
@@ -289,17 +541,11 @@ export function AdminVenuesPanel({ accessToken }: { accessToken: string }) {
     setError(null);
     setIsSaving(true);
     try {
-      const { lat, lng, ...updatable } = editFields;
-      void lat;
-      void lng;
-      await apiPatch(`/api/venues/${editingId}`, accessToken, {
-        ...updatable,
-        courtCount: Number(updatable.courtCount),
-      });
+      await apiPatch(`/api/venues/${editingId}`, accessToken, toApiPayload(editFields));
       setEditingId(null);
       loadVenues();
-    } catch {
-      setError('Failed to save changes.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to save changes.'));
     } finally {
       setIsSaving(false);
     }
@@ -318,6 +564,9 @@ export function AdminVenuesPanel({ accessToken }: { accessToken: string }) {
 
       {isCreating && (
         <form onSubmit={handleCreate} className="max-w-sm space-y-4 border-b border-border pb-6">
+          <p className="flex items-center gap-1.5 text-xs text-neutral-500">
+            <RequiredMarker /> indicates a required field
+          </p>
           <VenueFormFields
             fields={createFields}
             setFields={setCreateFields}
@@ -353,6 +602,9 @@ export function AdminVenuesPanel({ accessToken }: { accessToken: string }) {
             <li key={venue.id}>
               {editingId === venue.id && editFields ? (
                 <form onSubmit={handleSaveEdit} className="max-w-sm space-y-4 py-4">
+                  <p className="flex items-center gap-1.5 text-xs text-neutral-500">
+                    <RequiredMarker /> indicates a required field
+                  </p>
                   <VenueFormFields
                     fields={editFields}
                     setFields={setEditFields}

@@ -46,3 +46,16 @@ export function apiPost<T>(path: string, accessToken: string, body?: unknown): P
 export function apiDelete<T>(path: string, accessToken: string): Promise<T> {
   return apiRequest<T>('DELETE', path, accessToken);
 }
+
+// Server error bodies are `{ error: string }` — surface that message
+// directly instead of maintaining a parallel copy of it client-side, so the
+// two can't drift out of sync. Shared by every admin edit form so a 400 like
+// "courtCount must be at least 1" reaches the admin instead of a generic
+// "Failed to save changes."
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError && err.body && typeof err.body === 'object' && 'error' in err.body) {
+    const message = (err.body as { error?: unknown }).error;
+    if (typeof message === 'string') return message;
+  }
+  return fallback;
+}

@@ -105,20 +105,31 @@ test.describe('venue distance filter', () => {
     await deleteFixtureUser(userId);
   });
 
-  test('Distance control is hidden when geolocation permission is denied', async ({ page }) => {
+  test('Distance control is visible on load, before any location permission is requested', async ({ page }) => {
     await login(page, email, password);
     await page.goto('/venues');
-    // No permission granted -> the hook resolves to 'denied' and the
-    // Distance control never renders (see venue-filters.tsx's
-    // distanceAvailable prop) -- Search still works.
+    // The control itself no longer waits on a silent geolocation lookup --
+    // only picking an actual radius triggers the permission request (see
+    // use-geolocation.ts's lazy `request` and venue-filters.tsx's
+    // handleDistanceChange).
     await expect(page.getByLabel('Search', { exact: true })).toBeVisible();
-    await expect(page.getByLabel('Distance', { exact: true })).not.toBeVisible();
+    await expect(page.getByLabel('Distance', { exact: true })).toBeVisible();
   });
 
-  test('Distance control appears and sorts nearest-first when geolocation is granted', async ({
+  test('picking a radius without location permission shows a denial message and applies no radius filter', async ({
     page,
-    context,
   }) => {
+    await login(page, email, password);
+    await page.goto('/venues');
+
+    await page.getByLabel('Distance', { exact: true }).selectOption('25');
+    await expect(page.getByText('Location access denied — showing all venues.')).toBeVisible();
+    // Falls back to "Any distance" rather than staying stuck on a radius
+    // that was never actually backed by coordinates.
+    await expect(page.getByLabel('Distance', { exact: true })).toHaveValue('');
+  });
+
+  test('picking a radius after granting location sorts nearest-first', async ({ page, context }) => {
     const near = await createFixtureVenue({ lat: 37.001, lng: -122.0 });
     const far = await createFixtureVenue({ lat: 38.0, lng: -122.0 });
 
@@ -127,13 +138,17 @@ test.describe('venue distance filter', () => {
 
     try {
       await login(page, email, password);
+      await page.goto('/venues');
+      // Both visible -- no radius picked yet, so no distance filter is applied.
+      await expect(page.getByText(near.name)).toBeVisible();
+      await expect(page.getByText(far.name)).toBeVisible();
+
       await Promise.all([
         page.waitForResponse((res) => res.url().includes('/api/venues') && res.url().includes('radius_miles')),
-        page.goto('/venues'),
+        page.getByLabel('Distance', { exact: true }).selectOption('25'),
       ]);
 
-      await expect(page.getByLabel('Distance', { exact: true })).toBeVisible();
-      // far.name is ~69mi away -- outside the default 25mi radius.
+      // far.name is ~69mi away -- outside the 25mi radius just picked.
       await expect(page.getByText(near.name)).toBeVisible();
       await expect(page.getByText(far.name)).not.toBeVisible();
     } finally {

@@ -15,19 +15,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { fieldClassName, labelClassName } from './field-styles';
 import { formatSessionDateTime, todayIso } from '@/lib/session-format';
+import { QUICK_TIMES, formatTimeLabel } from '@/lib/time-of-day';
 import { cn } from '@/lib/utils';
-
-// Common drop-in/league start times — one-tap selection instead of scrolling
-// a native <input type="time">'s hour/minute segments. The native time input
-// still sits below as a fallback for anything off this list.
-const QUICK_TIMES = ['06:00', '08:00', '09:00', '12:00', '15:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
-
-function formatTimeLabel(time: string): string {
-  const [h, m] = time.split(':').map(Number);
-  const suffix = h >= 12 ? 'PM' : 'AM';
-  const hour12 = h % 12 === 0 ? 12 : h % 12;
-  return m === 0 ? `${hour12} ${suffix}` : `${hour12}:${String(m).padStart(2, '0')} ${suffix}`;
-}
 
 interface StartsAtPickerProps {
   value: string; // 'YYYY-MM-DDTHH:mm', same shape <input type="datetime-local"> used

@@ -224,6 +224,11 @@ export function SessionFormFields({ mode, values, onChange, accessToken }: Sessi
               className={fieldClassName}
               value={{ venueId: values.venueId || null, venueName: values.venueName }}
               onChange={({ venueId, venueName }) => onChange({ venueId: venueId ?? '', venueName })}
+              // Moves focus straight to Skill min once a venue is picked from
+              // the dropdown -- the next field in the Logistics section (see
+              // venue-address-autocomplete.tsx for the same "advance focus on
+              // pick" pattern in the admin venue form).
+              onSelect={() => document.getElementById('skillMin')?.focus()}
             />
           ) : (
             <input

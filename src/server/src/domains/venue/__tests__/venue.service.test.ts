@@ -27,6 +27,7 @@ function makeChain() {
   chain['eq'] = vi.fn(() => chain);
   chain['update'] = vi.fn(() => chain);
   chain['insert'] = vi.fn(() => chain);
+  chain['delete'] = vi.fn(() => chain);
   chain['is'] = vi.fn(() => chain);
   chain['single'] = vi.fn();
   chain['resolveAs'] = (value: any) => {
@@ -356,6 +357,52 @@ describe('createVenue', () => {
       changes: null,
     });
   });
+
+  it('inserts venue_hours and returns the refetched venue when hours are provided', async () => {
+    const adminChain = makeChain();
+    adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const venueChain = makeChain();
+    venueChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const deleteChain = makeChain();
+    deleteChain.resolveAs({ error: null });
+    const insertHoursChain = makeChain();
+    insertHoursChain.resolveAs({ error: null });
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    const refetchChain = makeChain();
+    refetchChain['single'].mockResolvedValue({
+      data: { ...VENUE_ROW, venue_hours: [{ day_of_week: 1, open_time: '09:00', close_time: '21:00' }] },
+      error: null,
+    });
+    mockFrom
+      .mockReturnValueOnce(adminChain)
+      .mockReturnValueOnce(venueChain)
+      .mockReturnValueOnce(deleteChain)
+      .mockReturnValueOnce(insertHoursChain)
+      .mockReturnValueOnce(auditChain)
+      .mockReturnValueOnce(refetchChain);
+
+    const hours = [{ dayOfWeek: 1 as const, openTime: '09:00', closeTime: '21:00' }];
+    const venue = await createVenue('admin-1', { ...CREATE_FIELDS, hours });
+
+    expect(insertHoursChain['insert']).toHaveBeenCalledWith([
+      { venue_id: 'venue-1', day_of_week: 1, open_time: '09:00', close_time: '21:00' },
+    ]);
+    expect(venue?.hours).toEqual([{ dayOfWeek: 1, openTime: '09:00', closeTime: '21:00' }]);
+  });
+
+  it('does not touch venue_hours when hours is omitted', async () => {
+    const adminChain = makeChain();
+    adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const venueChain = makeChain();
+    venueChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(venueChain).mockReturnValueOnce(auditChain);
+
+    await createVenue('admin-1', CREATE_FIELDS);
+    expect(mockFrom).toHaveBeenCalledTimes(3); // admins check + insert + audit insert -- no venue_hours calls
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -499,6 +546,90 @@ describe('updateVenue', () => {
     mockFrom.mockReturnValueOnce(adminChain).mockReturnValueOnce(beforeChain).mockReturnValueOnce(updateChain);
 
     expect(await updateVenue('venue-1', 'admin-1', { name: 'New Name' })).toBeNull();
+  });
+
+  it('replaces venue_hours (delete then insert) and returns the refetched venue when hours are provided', async () => {
+    const adminChain = makeChain();
+    adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const beforeChain = makeChain();
+    beforeChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const updateChain = makeChain();
+    updateChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const deleteChain = makeChain();
+    deleteChain.resolveAs({ error: null });
+    const insertHoursChain = makeChain();
+    insertHoursChain.resolveAs({ error: null });
+    const refetchChain = makeChain();
+    refetchChain['single'].mockResolvedValue({
+      data: { ...VENUE_ROW, venue_hours: [{ day_of_week: 2, open_time: '10:00', close_time: '18:00' }] },
+      error: null,
+    });
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom
+      .mockReturnValueOnce(adminChain)
+      .mockReturnValueOnce(beforeChain)
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(deleteChain)
+      .mockReturnValueOnce(insertHoursChain)
+      .mockReturnValueOnce(refetchChain)
+      .mockReturnValueOnce(auditChain);
+
+    const hours = [{ dayOfWeek: 2 as const, openTime: '10:00', closeTime: '18:00' }];
+    const venue = await updateVenue('venue-1', 'admin-1', { hours });
+
+    expect(deleteChain['delete']).toHaveBeenCalled();
+    expect(deleteChain['eq']).toHaveBeenCalledWith('venue_id', 'venue-1');
+    expect(insertHoursChain['insert']).toHaveBeenCalledWith([
+      { venue_id: 'venue-1', day_of_week: 2, open_time: '10:00', close_time: '18:00' },
+    ]);
+    expect(venue?.hours).toEqual([{ dayOfWeek: 2, openTime: '10:00', closeTime: '18:00' }]);
+  });
+
+  it('deletes existing venue_hours without inserting when hours is set to an empty array', async () => {
+    const adminChain = makeChain();
+    adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const beforeChain = makeChain();
+    beforeChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const updateChain = makeChain();
+    updateChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const deleteChain = makeChain();
+    deleteChain.resolveAs({ error: null });
+    const refetchChain = makeChain();
+    refetchChain['single'].mockResolvedValue({ data: { ...VENUE_ROW, venue_hours: [] }, error: null });
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom
+      .mockReturnValueOnce(adminChain)
+      .mockReturnValueOnce(beforeChain)
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(deleteChain)
+      .mockReturnValueOnce(refetchChain)
+      .mockReturnValueOnce(auditChain);
+
+    const venue = await updateVenue('venue-1', 'admin-1', { hours: [] });
+
+    expect(deleteChain['delete']).toHaveBeenCalled();
+    expect(venue?.hours).toEqual([]);
+  });
+
+  it('does not touch venue_hours when hours is omitted from the patch', async () => {
+    const adminChain = makeChain();
+    adminChain['single'].mockResolvedValue({ data: ADMIN_ROW, error: null });
+    const beforeChain = makeChain();
+    beforeChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const updateChain = makeChain();
+    updateChain['single'].mockResolvedValue({ data: VENUE_ROW, error: null });
+    const auditChain = makeChain();
+    auditChain.resolveAs({ error: null });
+    mockFrom
+      .mockReturnValueOnce(adminChain)
+      .mockReturnValueOnce(beforeChain)
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(auditChain);
+
+    await updateVenue('venue-1', 'admin-1', { name: 'New Name' });
+    expect(mockFrom).toHaveBeenCalledTimes(4); // admins check + before-fetch + update + audit insert
   });
 });
 

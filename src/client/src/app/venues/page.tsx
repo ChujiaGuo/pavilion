@@ -6,7 +6,7 @@ import { useGeolocation } from '@/lib/hooks/use-geolocation';
 import { apiGet } from '@/lib/api';
 import { AppShell } from '@/components/nav/app-shell';
 import { VenueCard } from '@/components/venue/venue-card';
-import { VenueFilters, type VenueBrowseFilters, DEFAULT_RADIUS_MILES } from '@/components/venue/venue-filters';
+import { VenueFilters, type VenueBrowseFilters } from '@/components/venue/venue-filters';
 import type { Venue } from '@pavilion/types';
 
 const EMPTY_FILTERS: VenueBrowseFilters = { search: '', type: '', dropInOnly: false, radiusMiles: '' };
@@ -17,18 +17,6 @@ export default function VenuesPage() {
   const [filters, setFilters] = useState<VenueBrowseFilters>(EMPTY_FILTERS);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Once geolocation resolves to granted, default the view to a
-  // distance-sorted listing (25mi) -- the "if necessary, prompt for user
-  // location for distance matching" flow from brainstorm.md's Venue
-  // Discovery pillar. Denied/unsupported leaves radiusMiles unset and the
-  // Distance control hidden entirely (see VenueFilters' distanceAvailable
-  // prop) -- falls back to Search + Type + Drop-in only.
-  useEffect(() => {
-    if (geolocation.status === 'granted') {
-      setFilters((prev) => (prev.radiusMiles ? prev : { ...prev, radiusMiles: DEFAULT_RADIUS_MILES }));
-    }
-  }, [geolocation.status]);
 
   useEffect(() => {
     if (!auth) return;
@@ -61,7 +49,8 @@ export default function VenuesPage() {
       <div className="mt-8">
         <VenueFilters
           value={filters}
-          distanceAvailable={geolocation.status === 'granted'}
+          geolocationStatus={geolocation.status}
+          onRequestLocation={geolocation.request}
           onApply={setFilters}
         />
       </div>

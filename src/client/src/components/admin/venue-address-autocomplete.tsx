@@ -33,6 +33,10 @@ interface VenueAddressAutocompleteProps {
   value: string;
   onChange: (address: string) => void;
   onPlaceSelected: (details: PlaceDetails) => void;
+  // Fired synchronously the moment a suggestion is clicked, before the
+  // place-details lookup even starts -- lets the caller move focus off this
+  // field onto whatever comes next (see admin-venues-panel.tsx).
+  onSelect?: () => void;
   className?: string;
   required?: boolean;
 }
@@ -48,6 +52,7 @@ export function VenueAddressAutocomplete({
   value,
   onChange,
   onPlaceSelected,
+  onSelect,
   className,
   required,
 }: VenueAddressAutocompleteProps) {
@@ -60,6 +65,17 @@ export function VenueAddressAutocomplete({
   // its lifetime rather than showing a spinner/empty-dropdown on every
   // keystroke forever (see venue.places.ts's `configured` flag).
   const disabledRef = useRef(false);
+  // Whenever the admin simply tabs away without picking anything, skip the
+  // still-pending debounced search for that abandoned partial text -- a
+  // wasted billed Places call otherwise.
+  const isFocusedRef = useRef(false);
+  // Picking a suggestion sets `value` to the picked text (below), which
+  // would otherwise re-trigger this same effect and re-search for -- then
+  // reopen the dropdown on -- an address that's already resolved. Checked
+  // against the actual picked text (not just focus, which isn't guaranteed
+  // to have moved away by the time the debounce fires) -- same fix as
+  // venue-picker.tsx's equivalent `value.venueId` check.
+  const lastPickedTextRef = useRef<string | null>(null);
 
   useEffect(() => {
     const trimmed = value.trim();
@@ -67,8 +83,13 @@ export function VenueAddressAutocomplete({
       setSuggestions([]);
       return;
     }
+    if (trimmed === lastPickedTextRef.current) {
+      setSuggestions([]);
+      return;
+    }
     const seq = ++requestSeq.current;
     const timeout = setTimeout(() => {
+      if (!isFocusedRef.current) return;
       apiGet<{ configured: boolean; suggestions: AddressSuggestion[] }>(
         `/api/venues/places/autocomplete?input=${encodeURIComponent(trimmed)}&sessiontoken=${sessionTokenRef.current}`,
         accessToken,
@@ -98,7 +119,11 @@ export function VenueAddressAutocomplete({
     const sessionToken = sessionTokenRef.current;
     setSuggestions([]);
     setIsOpen(false);
+    lastPickedTextRef.current = suggestion.text;
     onChange(suggestion.text);
+    // Synchronous, before the place-details await below -- moves focus off
+    // this field right away rather than leaving it sitting focused.
+    onSelect?.();
 
     try {
       const res = await apiGet<{ configured: boolean; details: PlaceDetails | null }>(
@@ -126,7 +151,17 @@ export function VenueAddressAutocomplete({
       onOpenChange={setIsOpen}
       itemToStringValue={(s: AddressSuggestion) => s.text}
     >
-      <AutocompleteInput id={id} className={className} required={required} />
+      <AutocompleteInput
+        id={id}
+        className={className}
+        required={required}
+        onFocus={() => {
+          isFocusedRef.current = true;
+        }}
+        onBlur={() => {
+          isFocusedRef.current = false;
+        }}
+      />
       <AutocompleteContent>
         <AutocompleteEmpty>No addresses found</AutocompleteEmpty>
         <AutocompleteList>

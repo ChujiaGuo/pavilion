@@ -56,6 +56,7 @@ export type VenueCreateFields = {
   contactPhone?: string | null;
   contactWebsite?: string | null;
   bookingUrl?: string | null;
+  hours?: VenueHours[];
 };
 
 export type VenueUpdateFields = Partial<Omit<VenueCreateFields, 'lat' | 'lng'>>;
@@ -142,6 +143,24 @@ function buildVenueChanges(fields: VenueUpdateFields, before: Venue, after: Venu
 
 const VENUE_SELECT = '*, venue_hours(day_of_week, open_time, close_time)';
 
+// Full replace rather than a per-day diff/upsert -- an edit form resubmits
+// the whole weekly schedule on save (same reasoning as buildVenueChanges
+// above), and venue_hours has no unique constraint on (venue_id,
+// day_of_week) to upsert against anyway (see database-schema.md).
+async function replaceVenueHours(venueId: string, hours: VenueHours[]): Promise<void> {
+  await supabase.from('venue_hours').delete().eq('venue_id', venueId);
+  if (hours.length > 0) {
+    await supabase.from('venue_hours').insert(
+      hours.map((h) => ({
+        venue_id: venueId,
+        day_of_week: h.dayOfWeek,
+        open_time: h.openTime,
+        close_time: h.closeTime,
+      })),
+    );
+  }
+}
+
 export async function getVenueById(id: string): Promise<Venue | null> {
   const { data, error } = await supabase
     .from('venues')
@@ -207,9 +226,15 @@ export async function createVenue(userId: string, fields: VenueCreateFields): Pr
 
   if (error || !data) return null;
 
+  if (fields.hours && fields.hours.length > 0) {
+    await replaceVenueHours(data.id, fields.hours);
+  }
+
   await logVenueEdit(data.id, userId, 'create');
 
-  return toVenue(data as VenueRow);
+  return fields.hours && fields.hours.length > 0
+    ? (await getVenueById(data.id)) ?? toVenue(data as VenueRow)
+    : toVenue(data as VenueRow);
 }
 
 export async function updateVenue(
@@ -249,7 +274,14 @@ export async function updateVenue(
   const { data, error } = await query.select(VENUE_SELECT).single();
 
   if (error || !data) return null;
-  const venue = toVenue(data as VenueRow);
+
+  if (fields.hours !== undefined) {
+    await replaceVenueHours(id, fields.hours);
+  }
+
+  const venue = fields.hours !== undefined
+    ? (await getVenueById(id)) ?? toVenue(data as VenueRow)
+    : toVenue(data as VenueRow);
 
   if (admin) {
     await logVenueEdit(id, userId, 'edit', before ? buildVenueChanges(fields, before, venue) : null);

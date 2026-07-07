@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { RequiredMarker } from '@/components/ui/required-marker';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
-import { apiGet, apiPatch, apiPost, ApiError } from '@/lib/api';
+import { apiGet, apiPatch, apiPost, apiErrorMessage, ApiError } from '@/lib/api';
 import { roleAtLeast } from '@/lib/admin-role';
 import type { AdminRole, PlayFormat, PlayStyle, PrivacyLevel, User } from '@pavilion/types';
 
@@ -42,17 +43,6 @@ interface EditFields {
   preferredFormats: PlayFormat[];
   playStyle: PlayStyle;
   privacyLevel: PrivacyLevel;
-}
-
-// Server error bodies are `{ error: string }` — surface that message
-// directly instead of maintaining a parallel copy of it client-side, so the
-// two can't drift out of sync.
-function serverErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError && err.body && typeof err.body === 'object' && 'error' in err.body) {
-    const message = (err.body as { error?: unknown }).error;
-    if (typeof message === 'string') return message;
-  }
-  return fallback;
 }
 
 function toEditFields(user: User): EditFields {
@@ -166,7 +156,7 @@ export function AdminUsersPanel({ accessToken, role }: { accessToken: string; ro
         try {
           unverified = await apiPatch<User>(`/api/users/${editingId}/verify`, accessToken, { verified: false });
         } catch (err) {
-          setVerifyError(serverErrorMessage(err, 'Failed to update verification status.'));
+          setVerifyError(apiErrorMessage(err, 'Failed to update verification status.'));
           return;
         }
         setIsVerified(unverified.verifiedTier != null);
@@ -177,7 +167,7 @@ export function AdminUsersPanel({ accessToken, role }: { accessToken: string; ro
       try {
         updated = await apiPatch<User>(`/api/users/${editingId}`, accessToken, profilePayload);
       } catch (err) {
-        setSaveError(serverErrorMessage(err, 'Failed to save changes.'));
+        setSaveError(apiErrorMessage(err, 'Failed to save changes.'));
         return;
       }
 
@@ -192,7 +182,7 @@ export function AdminUsersPanel({ accessToken, role }: { accessToken: string; ro
           // re-entering the name that just unblocked it.
           setResults((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
           setIsVerified(updated.verifiedTier != null);
-          setVerifyError(serverErrorMessage(err, 'Failed to update verification status.'));
+          setVerifyError(apiErrorMessage(err, 'Failed to update verification status.'));
           return;
         }
       }
@@ -259,10 +249,18 @@ export function AdminUsersPanel({ accessToken, role }: { accessToken: string; ro
             {editingId === user.id && fields ? (
               <div className="max-w-sm space-y-6 py-4">
                 <form onSubmit={handleSave} className="space-y-4">
+                  <p className="flex items-center gap-1.5 text-xs text-neutral-500">
+                    <RequiredMarker /> indicates a required field
+                  </p>
+
                   <div className="space-y-2">
-                    <Label htmlFor={`displayName-${user.id}`}>Display name</Label>
+                    <Label htmlFor={`displayName-${user.id}`}>
+                      Display name
+                      <RequiredMarker />
+                    </Label>
                     <Input
                       id={`displayName-${user.id}`}
+                      required
                       value={fields.displayName}
                       onChange={(e) => setFields({ ...fields, displayName: e.target.value })}
                     />

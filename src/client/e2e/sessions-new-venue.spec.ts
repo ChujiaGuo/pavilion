@@ -54,6 +54,9 @@ test.describe('create-session venue picker', () => {
       venueInput.fill(venueName),
     ]);
     await page.getByText(venueName, { exact: true }).click();
+    // Picking a suggestion advances focus straight to Skill min (see
+    // venue-picker.tsx's onSelect / session-form-fields.tsx).
+    await expect(page.getByLabel(/Skill min/i)).toBeFocused();
 
     await submitAndGetSessionId(page);
 

@@ -16,6 +16,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { fieldClassName, labelClassName } from '@/components/session/field-styles';
+import type { GeolocationStatus } from '@/lib/hooks/use-geolocation';
 import type { VenueType } from '@pavilion/types';
 
 // Same 400ms reactive-debounce convention as session-filters.tsx -- see
@@ -36,18 +37,17 @@ export interface VenueBrowseFilters {
   type: VenueType | '';
   dropInOnly: boolean;
   // '' means "Any distance" (no radius filter, no distance sort) -- distinct
-  // from a specific radius like '25'. Only meaningful when the page's own
-  // geolocation lookup has resolved to 'granted' (see VenueFiltersProps.
-  // distanceAvailable) -- the control itself is hidden otherwise, matching
-  // "fallback to no filters/name filter if permission is denied".
+  // from a specific radius like '25'. Only takes effect once geolocation has
+  // resolved to 'granted' (see VenueFiltersProps.geolocationStatus) -- picking
+  // a radius before that is what triggers the permission request in the
+  // first place (see handleDistanceChange below).
   radiusMiles: string;
 }
 
-export const DEFAULT_RADIUS_MILES = '25';
-
 interface VenueFiltersProps {
   value: VenueBrowseFilters;
-  distanceAvailable: boolean;
+  geolocationStatus: GeolocationStatus;
+  onRequestLocation: () => void;
   onApply: (filters: VenueBrowseFilters) => void;
 }
 
@@ -94,14 +94,22 @@ function SecondaryFilterFields({ draft, onChange }: SecondaryFilterFieldsProps) 
 
 // Structurally mirrors session-filters.tsx's SessionFilters: Search stays
 // inline as the always-visible primary control (same underline field style,
-// field-styles.ts), plus Distance when geolocation is available; Type and
-// Drop-in-available sit behind the same responsive "More filters"
-// disclosure (Drawer below sm, Popover at sm+).
-export function VenueFilters({ value, distanceAvailable, onApply }: VenueFiltersProps) {
+// field-styles.ts), plus Distance (also always visible -- see
+// handleDistanceChange); Type and Drop-in-available sit behind the same
+// responsive "More filters" disclosure (Drawer below sm, Popover at sm+).
+export function VenueFilters({ value, geolocationStatus, onRequestLocation, onApply }: VenueFiltersProps) {
   const [draft, setDraft] = useState<VenueBrowseFilters>(value);
   const [isOpen, setIsOpen] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 640px)', { noSsr: true });
   const lastAppliedRef = useRef(JSON.stringify(value));
+
+  // A radius picked before geolocation has resolved to 'granted' -- held
+  // here rather than applied to `draft` immediately, since `draft.radiusMiles`
+  // set to a value geolocation hasn't actually backed yet would silently no-op
+  // (the page only sends lat/lng/radius once granted) while still showing
+  // that radius as selected. Applied once permission resolves; discarded on
+  // denial/unsupported so the select falls back to "Any distance".
+  const [pendingRadius, setPendingRadius] = useState<string | null>(null);
 
   const hasSecondaryFilters = draft.type !== '' || draft.dropInOnly;
 
@@ -117,6 +125,34 @@ export function VenueFilters({ value, distanceAvailable, onApply }: VenueFilters
 
   function handleDraftChange(patch: Partial<VenueBrowseFilters>) {
     setDraft((prev) => ({ ...prev, ...patch }));
+  }
+
+  useEffect(() => {
+    if (pendingRadius === null) return;
+    if (geolocationStatus === 'granted') {
+      handleDraftChange({ radiusMiles: pendingRadius });
+      setPendingRadius(null);
+    } else if (geolocationStatus === 'denied' || geolocationStatus === 'unsupported') {
+      setPendingRadius(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geolocationStatus, pendingRadius]);
+
+  // The Distance control is the trigger for the location permission
+  // request, not page load (see technical-notes.md) -- selecting "Any
+  // distance" never needs a location, but any real radius does.
+  function handleDistanceChange(nextRadius: string) {
+    if (nextRadius === '') {
+      setPendingRadius(null);
+      handleDraftChange({ radiusMiles: '' });
+      return;
+    }
+    if (geolocationStatus === 'granted') {
+      handleDraftChange({ radiusMiles: nextRadius });
+      return;
+    }
+    setPendingRadius(nextRadius);
+    onRequestLocation();
   }
 
   function handleReset() {
@@ -153,26 +189,33 @@ export function VenueFilters({ value, distanceAvailable, onApply }: VenueFilters
         />
       </div>
 
-      {distanceAvailable && (
-        <div className="min-w-[9rem] flex-1 basis-40">
-          <label htmlFor="venue-filter-distance" className={labelClassName}>
-            Distance
-          </label>
-          <select
-            id="venue-filter-distance"
-            value={draft.radiusMiles}
-            onChange={(e) => handleDraftChange({ radiusMiles: e.target.value })}
-            className={cn(fieldClassName, 'appearance-none bg-transparent')}
-          >
-            <option value="">Any distance</option>
-            {RADIUS_OPTIONS.map((mi) => (
-              <option key={mi} value={mi}>
-                {mi} mi
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      <div className="min-w-[9rem] flex-1 basis-40">
+        <label htmlFor="venue-filter-distance" className={labelClassName}>
+          Distance
+        </label>
+        <select
+          id="venue-filter-distance"
+          value={pendingRadius ?? draft.radiusMiles}
+          onChange={(e) => handleDistanceChange(e.target.value)}
+          className={cn(fieldClassName, 'appearance-none bg-transparent')}
+        >
+          <option value="">Any distance</option>
+          {RADIUS_OPTIONS.map((mi) => (
+            <option key={mi} value={mi}>
+              {mi} mi
+            </option>
+          ))}
+        </select>
+        {geolocationStatus === 'loading' && (
+          <p className="mt-1 text-xs text-neutral-500">Requesting location…</p>
+        )}
+        {geolocationStatus === 'denied' && (
+          <p className="mt-1 text-xs text-neutral-500">Location access denied — showing all venues.</p>
+        )}
+        {geolocationStatus === 'unsupported' && (
+          <p className="mt-1 text-xs text-neutral-500">Location isn&apos;t available in this browser.</p>
+        )}
+      </div>
 
       <div className="flex shrink-0 flex-col">
         <span className={cn(labelClassName, 'invisible')} aria-hidden>

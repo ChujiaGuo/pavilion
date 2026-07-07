@@ -328,6 +328,21 @@ describe('GET /:id', () => {
 // POST /
 // ---------------------------------------------------------------------------
 
+const VALID_CREATE_BODY = {
+  name: 'Badminton Hub',
+  type: 'club',
+  address: '123 Main St',
+  city: 'Vancouver',
+  region: 'BC',
+  lat: 49.2827,
+  lng: -123.1207,
+  courtCount: 4,
+  surfaceType: 'synthetic_mat',
+  shuttleType: 'feather',
+  dropInAvailable: true,
+  reservationRequired: false,
+};
+
 describe('POST /', () => {
   it('returns 401 when no Authorization header is present', async () => {
     const res = await venueRouter.request('/', { method: 'POST', body: '{}' });
@@ -339,7 +354,7 @@ describe('POST /', () => {
     const res = await venueRouter.request('/', {
       method: 'POST',
       headers: { ...withAuth(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Hub' }),
+      body: JSON.stringify(VALID_CREATE_BODY),
     });
     expect(res.status).toBe(403);
   });
@@ -349,10 +364,41 @@ describe('POST /', () => {
     const res = await venueRouter.request('/', {
       method: 'POST',
       headers: { ...withAuth(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Hub' }),
+      body: JSON.stringify(VALID_CREATE_BODY),
     });
     expect(res.status).toBe(201);
     expect((await res.json()).id).toBe(VENUE_ID);
+  });
+
+  it('returns 400 when required fields are missing, without calling createVenue', async () => {
+    const res = await venueRouter.request('/', {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Hub' }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockCreateVenue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['name is blank', { name: '   ' }],
+    ['type is invalid', { type: 'arbitrary_string' }],
+    ['address is blank', { address: '' }],
+    ['city is blank', { city: '' }],
+    ['region is blank', { region: '' }],
+    ['lat is out of range', { lat: 90.1 }],
+    ['lng is out of range', { lng: -180.1 }],
+    ['courtCount is 0', { courtCount: 0 }],
+    ['surfaceType is invalid', { surfaceType: 'arbitrary_string' }],
+    ['shuttleType is invalid', { shuttleType: 'arbitrary_string' }],
+  ])('returns 400 when %s, without calling createVenue', async (_label, override) => {
+    const res = await venueRouter.request('/', {
+      method: 'POST',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...VALID_CREATE_BODY, ...override }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockCreateVenue).not.toHaveBeenCalled();
   });
 });
 
@@ -385,6 +431,66 @@ describe('PATCH /:id', () => {
     });
     expect(res.status).toBe(200);
     expect((await res.json()).id).toBe(VENUE_ID);
+  });
+
+  it.each([
+    ['name is blank', { name: '   ' }],
+    ['type is invalid', { type: 'arbitrary_string' }],
+    ['address is blank', { address: '' }],
+    ['city is blank', { city: '' }],
+    ['region is blank', { region: '' }],
+    ['courtCount is 0', { courtCount: 0 }],
+    ['surfaceType is invalid', { surfaceType: 'arbitrary_string' }],
+    ['shuttleType is invalid', { shuttleType: 'arbitrary_string' }],
+    ['hours is not an array', { hours: 'Monday 9-5' }],
+    ['hours entry is not an object', { hours: ['Monday'] }],
+    ['hours.dayOfWeek is out of range', { hours: [{ dayOfWeek: 7, openTime: '09:00', closeTime: '17:00' }] }],
+    ['hours.dayOfWeek is not an integer', { hours: [{ dayOfWeek: 1.5, openTime: '09:00', closeTime: '17:00' }] }],
+    [
+      'hours has a duplicate dayOfWeek',
+      {
+        hours: [
+          { dayOfWeek: 1, openTime: '09:00', closeTime: '17:00' },
+          { dayOfWeek: 1, openTime: '10:00', closeTime: '18:00' },
+        ],
+      },
+    ],
+    ['hours.openTime is malformed', { hours: [{ dayOfWeek: 1, openTime: '9am', closeTime: '17:00' }] }],
+    ['hours.closeTime is malformed', { hours: [{ dayOfWeek: 1, openTime: '09:00', closeTime: '25:00' }] }],
+  ])('returns 400 when %s, without calling updateVenue', async (_label, body) => {
+    const res = await venueRouter.request(`/${VENUE_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    expect(res.status).toBe(400);
+    expect(mockUpdateVenue).not.toHaveBeenCalled();
+  });
+
+  it('accepts a valid hours array', async () => {
+    mockUpdateVenue.mockResolvedValue(VENUE as any);
+    const res = await venueRouter.request(`/${VENUE_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hours: [{ dayOfWeek: 1, openTime: '09:00', closeTime: '21:00' }] }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockUpdateVenue).toHaveBeenCalledWith(
+      VENUE_ID,
+      USER_ID,
+      expect.objectContaining({ hours: [{ dayOfWeek: 1, openTime: '09:00', closeTime: '21:00' }] })
+    );
+  });
+
+  it('accepts an empty hours array (clears all hours)', async () => {
+    mockUpdateVenue.mockResolvedValue(VENUE as any);
+    const res = await venueRouter.request(`/${VENUE_ID}`, {
+      method: 'PATCH',
+      headers: { ...withAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hours: [] }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockUpdateVenue).toHaveBeenCalled();
   });
 });
 

@@ -42,6 +42,11 @@ interface VenuePickerProps {
   placeholder?: string;
   required?: boolean;
   className?: string;
+  // Fired synchronously right after a suggestion is picked -- lets the
+  // caller move focus to whatever field comes next (see
+  // session-form-fields.tsx), the same "advance focus on pick" pattern
+  // venue-address-autocomplete.tsx uses for the admin venue-creation form.
+  onSelect?: () => void;
 }
 
 // Shared debounced venue search used by both the create-session form and the
@@ -58,6 +63,7 @@ export function VenuePicker({
   placeholder,
   required,
   className,
+  onSelect,
 }: VenuePickerProps) {
   const [query, setQuery] = useState(value.venueName);
   const [suggestions, setSuggestions] = useState<Venue[]>([]);
@@ -78,6 +84,16 @@ export function VenuePicker({
       setSuggestions([]);
       return;
     }
+    // A pick (handlePick) sets `query` to the picked venue's own name, which
+    // would otherwise re-trigger this same effect and re-search for -- then
+    // reopen the dropdown on -- a venue that's already committed. Skipping
+    // whenever the text still matches a committed venueId means this is
+    // gated on the actual committed value, not on focus having moved away
+    // (which callers aren't required to do -- see VenuePicker's onSelect).
+    if (value.venueId && trimmed === value.venueName.trim()) {
+      setSuggestions([]);
+      return;
+    }
     const seq = ++requestSeq.current;
     const timeout = setTimeout(() => {
       apiGet<{ venues: Venue[] }>(`/api/venues?name=${encodeURIComponent(trimmed)}`, accessToken)
@@ -89,7 +105,7 @@ export function VenuePicker({
         });
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
-  }, [query, accessToken]);
+  }, [query, accessToken, value.venueId, value.venueName]);
 
   useEffect(() => {
     setIsOpen(suggestions.length > 0);
@@ -112,6 +128,7 @@ export function VenuePicker({
     setSuggestions([]);
     setIsOpen(false);
     onChange({ venueId: venue.id, venueName: venue.name });
+    onSelect?.();
   }
 
   function handleClear() {
