@@ -57,7 +57,7 @@ Canonical copy of this table — `README.md`/`CLAUDE.md` reference it, don't dup
 
 **No booking transactions in v1** — the app is a coordination layer; organizers collect payment externally.
 
-**Auth** — Supabase Auth called directly from the client (`@supabase/ssr`), no `/api/auth` endpoint; `middleware/auth.ts` validates the bearer token generically on every domain API call. Email confirmation required before login; Google OAuth via PKCE `/auth/callback`; client-side `useRequireAuth` hook guards every authenticated page. Full flow detail (including local-dev config gotchas) is in misc-tech-notes.md's Auth and Client Application Shell sections.
+**Auth** — Supabase Auth called directly from the client (`@supabase/ssr`), no `/api/auth` endpoint; `middleware/auth.ts` validates the bearer token generically on every domain API call. Email confirmation required before login; Google OAuth via PKCE `/auth/callback`; client-side `useRequireAuth` hook guards every authenticated page. A 401 from any domain API call (session expired/revoked after `useRequireAuth` already let the page render) is handled once, centrally, in `lib/api.ts`'s `apiRequest` — it signs out locally and hard-redirects to `/login?next=...`. Pages should keep swallowing request failures into their own "couldn't load" state and must not add their own 401-specific handling. Full flow detail (including local-dev config gotchas) is in misc-tech-notes.md's Auth and Client Application Shell sections.
 
 **Security headers** — CORS is an explicit `ALLOWED_ORIGINS` allow-list (`src/server/src/index.ts`); CSP is client-only and Report-Only for now (`next.config.ts`). Detail in misc-tech-notes.md's Security Headers & CORS section.
 

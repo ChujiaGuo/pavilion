@@ -1,3 +1,5 @@
+import { createClient } from './supabase/client';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL!;
 
 export class ApiError extends Error {
@@ -6,6 +8,26 @@ export class ApiError extends Error {
   constructor(public status: number, path: string, public body?: unknown) {
     super(`Request to ${path} failed with status ${status}`);
   }
+}
+
+// A 401 means the token useRequireAuth handed us no longer validates
+// server-side — typically the session expired while the user was already on
+// a gated page, so there's no local signal to catch it before this request
+// went out. Every caller already just swallows a failed request into its own
+// "couldn't load" state (see profile/venues/sessions pages), which reads as
+// a dead end rather than what's actually happening, so handle it once here
+// instead of teaching every page to distinguish 401 from a generic failure.
+let redirectingToLogin = false;
+
+function redirectToLogin() {
+  if (typeof window === 'undefined' || redirectingToLogin) return;
+  redirectingToLogin = true;
+  // Clears the now-invalid cached session so a direct nav back to a gated
+  // page doesn't hand useRequireAuth a session that looks present locally
+  // but keeps 401ing.
+  void createClient().auth.signOut();
+  const next = window.location.pathname;
+  window.location.href = `/login?next=${encodeURIComponent(next)}`;
 }
 
 async function apiRequest<T>(
@@ -22,6 +44,8 @@ async function apiRequest<T>(
     },
     ...(body !== undefined && { body: JSON.stringify(body) }),
   });
+
+  if (res.status === 401) redirectToLogin();
 
   if (!res.ok) {
     const errorBody = await res.json().catch(() => undefined);

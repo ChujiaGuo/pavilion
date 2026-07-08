@@ -76,3 +76,42 @@ test.describe('post-login redirect to the originally-requested page', () => {
     await deleteFixtureUser(userId);
   });
 });
+
+test.describe('session expiring while already on a gated page', () => {
+  test('a stale/invalid access token redirects to login on the next navigation instead of a dead "couldn\'t load" page', async ({
+    page,
+    context,
+  }) => {
+    const { userId, email, password } = await createFixtureUser();
+
+    await page.goto('/login');
+    await page.fill('#email', email);
+    await page.fill('#password', password);
+    await page.getByRole('button', { name: 'Log in' }).click();
+    await page.waitForURL('/home');
+
+    // Simulate the session expiring/being revoked while the user is already
+    // on a logged-in page: corrupt the auth cookie's access_token. The
+    // Supabase client only auto-refreshes based on the stored `expires_at`
+    // timestamp, so this looks locally valid — the next API call is what
+    // surfaces it, via a real 401 from the server.
+    const cookies = await context.cookies();
+    const authCookie = cookies.find((c) => c.name === 'sb-127-auth-token');
+    if (!authCookie) throw new Error('Supabase auth cookie not found');
+    const decoded = JSON.parse(
+      Buffer.from(authCookie.value.replace(/^base64-/, ''), 'base64').toString(),
+    );
+    decoded.access_token = 'corrupted.' + decoded.access_token.split('.').slice(1).join('.');
+    await context.addCookies([
+      { ...authCookie, value: 'base64-' + Buffer.from(JSON.stringify(decoded)).toString('base64') },
+    ]);
+
+    // Client-side nav to another gated page, same as a user clicking a nav
+    // link after their session went stale.
+    await page.locator('a[href="/profile"]:visible').click();
+
+    await page.waitForURL(/\/login\?next=%2Fprofile/);
+
+    await deleteFixtureUser(userId);
+  });
+});
