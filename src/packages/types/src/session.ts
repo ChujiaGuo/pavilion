@@ -3,7 +3,7 @@ export type SessionFormat = 'casual_rotation' | 'king_of_the_court' | 'round_rob
 export type SessionVisibility = 'public' | 'invite_only';
 export type ShuttlePolicy = 'bring_your_own' | 'split_cost' | 'provided';
 export type RsvpStatus = 'going' | 'waitlisted' | 'cancelled' | 'attended' | 'no_show';
-export type SessionStatus = 'upcoming' | 'active' | 'completed' | 'cancelled';
+export type SessionStatus = 'upcoming' | 'active' | 'voting' | 'completed' | 'cancelled';
 
 export interface Session {
   id: string;

@@ -599,8 +599,8 @@ describe('POST /:id/attendance', () => {
     expect(res.status).toBe(403);
   });
 
-  it('returns 409 when session is not completed', async () => {
-    mockMarkAttendance.mockResolvedValue({ ok: false, reason: 'not_completed' });
+  it('returns 409 when session has not entered the voting stage', async () => {
+    mockMarkAttendance.mockResolvedValue({ ok: false, reason: 'not_voting' });
 
     const res = await sessionRouter.request(`/${SESSION_ID}/attendance`, {
       method: 'POST',

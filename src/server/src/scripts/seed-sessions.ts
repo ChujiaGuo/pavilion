@@ -4,7 +4,7 @@
 // (matched by a fixed list of emails) before inserting fresh data, rather
 // than accumulating duplicates.
 //
-// Depends on seed-venues.ts: sessions below link to real venue rows by name
+// Depends on venues.ts: sessions below link to real venue rows by name
 // (`venue_id` + `venue_name`, matching how session.service.ts's createSession
 // populates both from a selected venue), so those venues must already exist.
 // Run `npm run seed:venues` first (or `npm run seed:all`, which already
@@ -32,14 +32,14 @@ import type {
 const MIN_SCORE = 1.0;
 const UNVERIFIED_CEILING = 7.99;
 
-// Matches seed-venues.ts's SEED_PREFIX — kept as a separate literal (not a
+// Matches venues.ts's SEED_PREFIX — kept as a separate literal (not a
 // shared import) since these are two independently-runnable scripts, but the
-// full venue names below must match seed-venues.ts's VENUES exactly.
+// full venue names below must match venues.ts's VENUES exactly.
 const VENUE_SEED_PREFIX = '[SEED]';
 
-// Short handles for the venues seed-venues.ts creates, so SESSIONS below can
+// Short handles for the venues venues.ts creates, so SESSIONS below can
 // reference them without retyping the full prefixed name. Every one of
-// seed-venues.ts's 10 venues is used at least once across the sessions below.
+// venues.ts's 10 venues is used at least once across the sessions below.
 const VENUE = {
   rockville: `${VENUE_SEED_PREFIX} Rockville Badminton Club`,
   bethesda: `${VENUE_SEED_PREFIX} Bethesda Community Rec Center`,
@@ -80,7 +80,7 @@ interface SeedUserSpec {
 const USERS: SeedUserSpec[] = [
   {
     key: 'testUser',
-    email: 'testuser123@example.com',
+    email: 'testuser@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Test User',
     city: 'Rockville',
@@ -89,7 +89,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'beginner',
-    email: 'seed-beginner@example.test',
+    email: 'beginner@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Beginner Betty',
     city: 'Rockville',
@@ -98,7 +98,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'novice',
-    email: 'seed-novice@example.test',
+    email: 'novice@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Novice Nora',
     city: 'Rockville',
@@ -107,7 +107,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'recreational',
-    email: 'seed-recreational@example.test',
+    email: 'recreational@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Recreational Randy',
     city: 'Bethesda',
@@ -116,7 +116,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'intermediate',
-    email: 'seed-intermediate@example.test',
+    email: 'intermediate@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Intermediate Iris',
     city: 'Rockville',
@@ -125,7 +125,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'steady',
-    email: 'seed-steady@example.test',
+    email: 'steady@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Steady Sam',
     city: 'Silver Spring',
@@ -134,7 +134,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'advanced',
-    email: 'seed-advanced@example.test',
+    email: 'advanced@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Advanced Alex',
     city: 'Bethesda',
@@ -143,7 +143,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'elite',
-    email: 'seed-elite@example.test',
+    email: 'elite@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Elite Erin',
     city: 'Rockville',
@@ -152,7 +152,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'pro',
-    email: 'seed-pro@example.test',
+    email: 'pro@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Pro Priya',
     city: 'Bethesda',
@@ -165,7 +165,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'veteran',
-    email: 'seed-veteran@example.test',
+    email: 'veteran@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Veteran Vic',
     city: 'Wheaton',
@@ -178,7 +178,7 @@ const USERS: SeedUserSpec[] = [
   },
   {
     key: 'legend',
-    email: 'seed-legend@example.test',
+    email: 'legend@example.com',
     password: TEST_USER_PASSWORD,
     displayName: 'Legend Lena',
     city: 'Germantown',
@@ -214,20 +214,25 @@ function daysFromNow(days: number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-// Ten completed (past) sessions, one per venue, covering every whole grade
-// from 1 through 10+ — explicitly hitting the documented floor (1.00) and
-// unverified ceiling (7.99) boundaries, plus a beyond-10 "unbounded above 10"
-// exhibition session. Each carries a realistic organizer + a handful of
+// Ten completed/voting (past) sessions, one per venue, covering every whole
+// grade from 1 through 10+ — explicitly hitting the documented floor (1.00)
+// and unverified ceiling (7.99) boundaries, plus a beyond-10 "unbounded above
+// 10" exhibition session. Each carries a realistic organizer + a handful of
 // attendees drawn from adjacent grades (kept within the asymmetric
 // playing-up/playing-down tolerances Skill Range Enforcement documents, for
 // narrative consistency even though this script writes directly to the DB
 // and bypasses that check). The test user attends/no-shows a spread of these
-// so its own history isn't limited to sessions it organized.
+// so its own history isn't limited to sessions it organized. One of the ten
+// (grade 5, Pulse Fitness) is seeded straight into 'voting' with attendance
+// already marked (the first step within voting — see technical-notes.md's
+// "Session Status Lifecycle") rather than 'completed', which is currently
+// unreachable outside seed data, so the dashboard's "Ready to rate" section
+// always has a real example to show.
 //
 // Seven more sessions (six upcoming, one cancelled) round things out for
 // non-history flows: hosting, waitlisting, invite-only, and cancellation.
 const SESSIONS: SeedSessionSpec[] = [
-  // --- Past sessions (completed), grade 1 through grade 10+ ---
+  // --- Past sessions (completed/voting), grade 1 through grade 10+ ---
   {
     venueName: VENUE.shadyGrove,
     organizerKey: 'beginner',
@@ -330,8 +335,8 @@ const SESSIONS: SeedSessionSpec[] = [
     durationMinutes: 90,
     shuttlePolicy: 'split_cost',
     shuttleTubePrice: 6.5,
-    notes: 'Seed data — grade 5 band. Steady climbers meetup.',
-    status: 'completed',
+    notes: 'Seed data — grade 5 band. Steady climbers meetup. Sits in the voting stage with attendance already marked (the first step within voting).',
+    status: 'voting',
     rsvps: [
       { userKey: 'intermediate', status: 'attended', joinedOffsetMinutes: 0 },
       { userKey: 'advanced', status: 'attended', joinedOffsetMinutes: 1 },
@@ -687,7 +692,7 @@ async function createSessions(idByKey: Record<string, string>, venueIdByName: Re
     const venueId = venueIdByName[spec.venueName];
     if (!venueId) {
       throw new Error(
-        `No seeded venue named "${spec.venueName}" — check it matches a name in seed-venues.ts's VENUES exactly.`,
+        `No seeded venue named "${spec.venueName}" — check it matches a name in venues.ts's VENUES exactly.`,
       );
     }
     const startsAt = daysFromNow(spec.startsInDays);
@@ -752,7 +757,7 @@ async function main() {
   console.log('Creating sessions + RSVPs...');
   await createSessions(idByKey, venueIdByName);
 
-  const pastCount = SESSIONS.filter((s) => s.status === 'completed').length;
+  const pastCount = SESSIONS.filter((s) => s.status === 'completed' || s.status === 'voting').length;
 
   console.log('\nDone.');
   console.log(`Log in as the test user at http://localhost:3000/login`);

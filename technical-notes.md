@@ -1,6 +1,6 @@
 # Technical Notes
 
-_Last updated: 2026-07-13 (added moderator+ session-roster admin view (`GET /:id/rsvps?admin=true`) and player removal (`DELETE /:id/rsvps/:userId`, upcoming-only) to the session domain — see "Admin & Roles")_
+_Last updated: 2026-07-14 (reordered session status so `completed` is last and merged attendance-marking into `voting` as its first step, rather than a gate before it — see "Core Algorithms" → "Session Status Lifecycle"; added KI-008)_
 
 See `brainstorm.md` for product/idea context, `misc-tech-notes.md` for one-time decisions/historical notes/implementation footnotes, `database-schema.md` for full table definitions.
 
@@ -11,10 +11,10 @@ See `brainstorm.md` for product/idea context, `misc-tech-notes.md` for one-time 
 - [Platform & Stack](#platform--stack) — L21
 - [Architecture & Domain Boundaries](#architecture--domain-boundaries) — L42
 - [Admin & Roles](#admin--roles) — L66
-- [API Endpoints](#api-endpoints) — L79
-- [Core Algorithms](#core-algorithms) — L146
-- [Environments & Testing](#environments--testing) — L180
-- [Known Issues](#known-issues) — L192
+- [API Endpoints](#api-endpoints) — L81
+- [Core Algorithms](#core-algorithms) — L149
+- [Environments & Testing](#environments--testing) — L194
+- [Known Issues](#known-issues) — L206
 
 ---
 
@@ -114,9 +114,9 @@ All routes mounted under `/api/<domain>`. **Auth** `yes` = Bearer token required
 | `GET` | `/:id/rsvp` | yes | Caller's own RSVP status |
 | `GET` | `/:id/rsvps` | conditional (moderator+ for `admin=true`) | List active RSVPs with `displayName`; names visible to shared participants regardless of privacy, else `public`-only; `admin=true` returns every RSVP status (including `cancelled`/`attended`/`no_show`) and every name regardless of privacy |
 | `PATCH` | `/:id` | yes (organizer/moderator+) | Update fields; re-validates the skill-range invariant even on a single-bound patch |
-| `PATCH` | `/:id/status` | yes (organizer/moderator+) | Advance `upcoming → active → completed`; 409 on invalid transitions |
+| `PATCH` | `/:id/status` | yes (organizer/moderator+) | Advance `upcoming → active → voting`; 409 on invalid transitions (including any attempt to leave `voting` — no exit yet) |
 | `POST` | `/` | yes | Create session; skill range validated against the `numeric(4,2)` column ceiling; returns `warning: "skill_range_wide"` if organizer grade is far from the range |
-| `POST` | `/:id/attendance` | yes (organizer/moderator+) | Mark attendance; no-shows lose 10 reliability points |
+| `POST` | `/:id/attendance` | yes (organizer/moderator+) | Mark attendance — the first step within the voting stage, not a gate into it; requires `status === 'voting'` (409 `not_voting` otherwise) and doesn't change `status` further; no-shows lose 10 reliability points (see Core Algorithms' "Session Status Lifecycle") |
 | `POST` | `/:id/rsvp` | yes | Join; enforces skill range (asymmetric — see Core Algorithms) and capacity |
 
 ### `/api/ratings`
@@ -167,6 +167,17 @@ Scope, race-handling, and onboarding implementation detail: misc-tech-notes.md's
 - Organizer joining their own session: skill check skipped entirely
 - Not yet implemented: `strict_range` toggle (column exists, unenforced), organizer notification on a high-rated joiner, rating dampening for out-of-range players
 
+### Session Status Lifecycle
+`sessions.status`: `upcoming → active → voting → completed`, plus a `cancelled` terminal state reachable from `upcoming`. `completed` is named for what it means once it's reachable — the whole lifecycle, including voting, is done — so it's ordered last; today it's unreachable through the live app (nothing yet transitions a session out of `voting`), and only appears via seed data or an admin edit.
+
+`upcoming → active` and `active → voting` are the only implemented transitions, both manual (`PATCH /:id/status`, `progressSessionStatus`'s `VALID_TRANSITIONS` map — no entry past `voting`, so advancing a `voting` session 409s the same way any other invalid transition does).
+
+**Attendance-marking is the first step within voting, not a gate into it.** `markAttendance` (`POST /:id/attendance`) requires `status === 'voting'` (409 `not_voting` otherwise) and never changes `status` itself — the session was already moved into `voting` by the `active → voting` transition above. This makes re-calling it naturally idempotent again (status doesn't change between calls, so a second call just finds no remaining `going` RSVPs to process) — simpler than the "lock attendance once voting starts" behavior an earlier version of this had.
+
+`voting` is where `POST /api/ratings/submit` (already implemented) becomes the relevant next step — its eligibility check only excludes `cancelled` and not-yet-started sessions, so it already covers `voting` without a new allow-list entry. **Known gap, not yet fixed (see Known Issues KI-008):** that eligibility check requires both rater and ratee to currently hold `session_rsvps.status = 'going'`, but `markAttendance` flips `going` to `attended`/`no_show` — so submitting a rating for anyone whose attendance has actually been recorded currently fails `not_participant`. What's *also* still missing is a client page that lets a player cast those votes at all — see misc-tech-notes.md's "Session domain scope notes." Until both exist, `voting` sessions only surface as a status: the session detail page shows a participant-visible (not organizer-gated) "this session is in the voting stage" note plus, for the organizer, the attendance-marking action; `/home`'s dashboard lists them under "Ready to rate" (same `attendee_id`/`organizer_id` + `status=` fetch pattern "Next session"/"Recent activity" already use).
+
+**Deferred: automatic `upcoming`/`active` → `voting` transition a day after `starts_at`.** Not implemented — there's no scheduled-job infrastructure in this codebase yet (same gap as automatic no-show detection and recurring-session auto-spawning). Two implementation shapes were considered and left for whenever this gets built: a lazy, computed-on-read transition (no new infra — a session's effective status is computed and written through the next time it's fetched) versus a real scheduled sweep (Supabase `pg_cron` or a Render Cron Job hitting a new endpoint, needs new infra). See brainstorm.md's Future Features Roadmap.
+
 ### RSVP & Attendance Concurrency
 Atomic Postgres functions (`SECURITY DEFINER`, `REVOKE`d from `PUBLIC`/`anon`/`authenticated`, granted to `service_role` only), called via `supabase.rpc(...)` from `session.service.ts`:
 - `join_session_atomic` — row-locks the session (`FOR UPDATE`), counts `going` RSVPs, inserts/upserts in one transaction
@@ -204,3 +215,4 @@ Confirmed defects deferred from v1. Fix before traffic warrants it; do not redis
 | KI-005 | `src/client/src/app/auth/callback/route.ts` | Open redirect: `next` is interpolated into the redirect with no allow-list on this route itself — not confirmed exploitable today since `next` is only ever set by our own code and Supabase's own redirect allow-list may already block an off-site target | If `next` is ever driven by anything beyond the two flows that set it today |
 | KI-006 | `admin.service.ts` (`listAdmins`), `user.service.ts` (`searchUsers`) | A DB query failure *after* the role check passes is swallowed into an empty-result success response, indistinguishable from a genuinely empty result | Before treating either endpoint's empty result as ground truth for anything operationally important |
 | KI-007 | `admin-venues-panel.tsx` (create form) | A venue can be created with `lat`/`lng` of exactly `(0, 0)` if no Places suggestion was ever clicked (`Number('')` coerces to `0`, passes the `NOT NULL` constraint) | Cheap to close — reject `lat === 0 && lng === 0` server-side, or require a resolved `placeId` before enabling Create |
+| KI-008 | `rating.service.ts`'s `submitRating` | Eligibility requires both rater and ratee to hold `session_rsvps.status = 'going'`, but `markAttendance` flips `going` to `attended`/`no_show` the moment attendance is recorded — so rating anyone whose attendance has actually been marked always fails `not_participant`, exactly the case real post-session voting needs | Building the vote-casting UI — change the check to accept `attended` (not `going`) alongside/instead |

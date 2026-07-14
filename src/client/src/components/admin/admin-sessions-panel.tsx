@@ -11,7 +11,7 @@ import { SESSION_STATUS_LABELS } from '@/lib/session-format';
 import { cn } from '@/lib/utils';
 import type { Session, SessionRsvp, SessionStatus } from '@pavilion/types';
 
-const STATUS_OPTIONS: SessionStatus[] = ['upcoming', 'active', 'completed', 'cancelled'];
+const STATUS_OPTIONS: SessionStatus[] = ['upcoming', 'active', 'voting', 'completed', 'cancelled'];
 
 // Same debounce shape as session-filters.tsx's SessionFilters — one shared
 // timer covering both the text query and the status pill, no explicit
@@ -163,7 +163,12 @@ export function AdminSessionsPanel({ accessToken }: { accessToken: string }) {
 
   // Marks every currently-going RSVP as attended (no no-shows) — a minimal
   // moderator action rather than a full per-attendee attendance checklist,
-  // which is a larger UI this page doesn't build out.
+  // which is a larger UI this page doesn't build out. Attendance is the
+  // first step within the voting stage (session.service.ts's markAttendance
+  // requires status === 'voting' and doesn't change it further), so unlike
+  // handleCancel/handleAdvanceStatus there's no local status patch needed
+  // here — the session's status is unchanged by this action, and it's safe
+  // to click again (a re-call just finds no remaining 'going' RSVPs).
   async function handleMarkAllAttended(session: Session) {
     setActionError(null);
     try {
@@ -373,7 +378,7 @@ export function AdminSessionsPanel({ accessToken }: { accessToken: string }) {
                       Advance status
                     </Button>
                   )}
-                  {session.status === 'completed' && (
+                  {session.status === 'voting' && (
                     <Button
                       type="button"
                       size="sm"

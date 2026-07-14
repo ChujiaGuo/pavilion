@@ -1,6 +1,6 @@
 # Database Schema
 
-_Last updated: 2026-07-13 (added `admin_session_edits`' `'remove_rsvp'` action, written by the new moderator+ `DELETE /api/sessions/:id/rsvps/:userId` endpoint — see technical-notes.md "Admin & Roles")_
+_Last updated: 2026-07-14 (`sessions.status`'s `'voting'` value now sits before `'completed'` — reordered so `completed` is the true final stage; attendance-marking moved inside voting as its first step, rather than gating entry into it — see technical-notes.md "Session Status Lifecycle")_
 
 PostgreSQL via Supabase. PostGIS extension enabled.
 
@@ -197,7 +197,7 @@ UNIQUE `(venue_id, date)`.
 | `shuttle_policy` | text | `'bring_your_own'`, `'split_cost'`, `'provided'` |
 | `shuttle_tube_price` | numeric(6,2) | nullable |
 | `notes` | text | nullable |
-| `status` | text | default `'upcoming'`. `'upcoming'`, `'active'`, `'completed'`, `'cancelled'` |
+| `status` | text | default `'upcoming'`. `'upcoming'`, `'active'`, `'voting'`, `'completed'`, `'cancelled'` — `voting` is entered manually (`active → voting`, `PATCH /:id/status`); attendance-marking (`POST /:id/attendance`) is the first step *within* voting, not a separate gate into it, and doesn't change `status` further. `completed` is currently unreachable in the live app (no exit from `voting` yet) — see technical-notes.md's "Session Status Lifecycle" |
 | `is_recurring` | boolean | default false |
 | `recurring_cron_expr` | text | nullable |
 | `parent_session_id` | uuid | nullable. FK → sessions |

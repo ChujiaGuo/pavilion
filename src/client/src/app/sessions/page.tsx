@@ -26,7 +26,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'attending', label: 'Attending' },
 ];
 
-const STATUS_OPTIONS: SessionStatus[] = ['upcoming', 'completed', 'cancelled'];
+const STATUS_OPTIONS: SessionStatus[] = ['upcoming', 'active', 'voting', 'completed', 'cancelled'];
 
 export default function SessionsPage() {
   const auth = useRequireAuth();

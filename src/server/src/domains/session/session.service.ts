@@ -619,7 +619,7 @@ export type ProgressStatusResult =
 
 const VALID_TRANSITIONS: Partial<Record<SessionStatus, SessionStatus>> = {
   upcoming: 'active',
-  active: 'completed',
+  active: 'voting',
 };
 
 export async function progressSessionStatus(
@@ -662,8 +662,14 @@ const NO_SHOW_PENALTY = 10;
 
 export type MarkAttendanceResult =
   | { ok: true; attended: number; noShows: number }
-  | { ok: false; reason: 'not_found' | 'forbidden' | 'not_completed' | 'write_failed' };
+  | { ok: false; reason: 'not_found' | 'forbidden' | 'not_voting' | 'write_failed' };
 
+// Marking attendance is the first step within the voting stage, not a gate
+// into it — the session must already be 'voting' (entered via
+// progressSessionStatus's active -> voting transition) before attendance can
+// be marked. This makes re-calls naturally idempotent again: the session
+// stays 'voting' before and after, so a second call just finds no remaining
+// 'going' RSVPs to process.
 export async function markAttendance(
   sessionId: string,
   organizerId: string,
@@ -678,7 +684,7 @@ export async function markAttendance(
   if (sessionError || !session) return { ok: false, reason: 'not_found' };
   const isModerator = roleAtLeast(await getAdminRole(organizerId), 'moderator');
   if (!isModerator && session.organizer_id !== organizerId) return { ok: false, reason: 'forbidden' };
-  if (session.status !== 'completed') return { ok: false, reason: 'not_completed' };
+  if (session.status !== 'voting') return { ok: false, reason: 'not_voting' };
 
   // Only process RSVPs still in 'going' state — re-calls are safely ignored
   const { data: goingRsvps } = await supabase

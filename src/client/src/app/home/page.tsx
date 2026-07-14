@@ -28,6 +28,7 @@ export default function HomePage() {
   const auth = useRequireAuth();
   const [nextSession, setNextSession] = useState<Session | null>(null);
   const [recentSessions, setRecentSessions] = useState<Session[]>([]);
+  const [votingSessions, setVotingSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export default function HomePage() {
 
     async function load() {
       try {
-        const [attending, organizing, completed] = await Promise.all([
+        const [attending, organizing, completed, votingAttending, votingOrganizing] = await Promise.all([
           apiGet<{ sessions: Session[] }>(
             `/api/sessions?attendee_id=${userId}&status=upcoming`,
             accessToken
@@ -49,11 +50,27 @@ export default function HomePage() {
             `/api/sessions?attendee_id=${userId}&status=completed`,
             accessToken
           ),
+          apiGet<{ sessions: Session[] }>(
+            `/api/sessions?attendee_id=${userId}&status=voting`,
+            accessToken
+          ),
+          apiGet<{ sessions: Session[] }>(
+            `/api/sessions?organizer_id=${userId}&status=voting`,
+            accessToken
+          ),
         ]);
 
         const upcoming = [...attending.sessions, ...organizing.sessions].sort(byStartsAt('asc'));
         setNextSession(upcoming[0] ?? null);
         setRecentSessions(completed.sessions.sort(byStartsAt('desc')).slice(0, 5));
+
+        const votingIds = new Set<string>();
+        const voting = [...votingAttending.sessions, ...votingOrganizing.sessions].filter((s) => {
+          if (votingIds.has(s.id)) return false;
+          votingIds.add(s.id);
+          return true;
+        });
+        setVotingSessions(voting.sort(byStartsAt('desc')));
       } catch {
         // Widgets degrade to their empty states rather than blocking the page.
       } finally {
@@ -97,6 +114,24 @@ export default function HomePage() {
           </div>
         )}
       </section>
+
+      {!isLoading && votingSessions.length > 0 && (
+        <section className="mt-12">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-neutral-500">
+            Ready to rate
+          </h2>
+          <ul className="mt-3 divide-y divide-border">
+            {votingSessions.map((session) => (
+              <li key={session.id}>
+                <Link href={`/sessions/${session.id}`} className="block py-3">
+                  <p className="font-medium">{session.venueName}</p>
+                  <p className="text-sm text-neutral-500">{formatSessionTime(session.startsAt)}</p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-neutral-500">

@@ -1,6 +1,6 @@
 # Pavilion — Brainstorm Notes
 
-_Last updated: 2026-07-02_
+_Last updated: 2026-07-14_
 
 ---
 
@@ -238,6 +238,8 @@ Everything not in MVP Scope (v1) below lives here. `technical-notes.md` only doc
 | Global rating distribution recalibration | Periodic admin/cron job to correct distribution drift (e.g. grade inflation) if it occurs over time. Not part of the live per-vote scoring path. | TBD |
 | Coordinated voting / anomaly batch detection | Same rater-ratee pair exceeding N sessions without fresh raters in between, coordinated voting pattern detection across accounts. Needs batch/cron analysis, not per-request logic. Partially mitigated today by the recency-adjusted familiarity weight, but not flagged. | TBD |
 | Venue edit-suggestion auto-notify | If enough edits are suggested for a venue that hasn't claimed its listing, notify the venue and prompt them to take ownership. `submitEditSuggestion` currently just inserts a row — no threshold or notification logic exists yet. | TBD |
+| Automatic session status transition (`upcoming`/`active` → `voting`, a day after `starts_at`) | Today an organizer must manually advance a session past `active`; if they never do, it sits there forever. Decided anchor point: 1 day after `starts_at` (not session end time). Implementation shape still open — a lazy, computed-on-read transition (no new infra) vs. a real scheduled sweep (Supabase `pg_cron` or a Render Cron Job hitting a new endpoint) — neither built yet, this codebase has no scheduled-job infrastructure at all (same gap as recurring-session auto-spawning and automatic no-show detection). See technical-notes.md's "Session Status Lifecycle". | TBD |
+| Voting-stage vote-casting UI | `POST /api/ratings/submit` is implemented and a session correctly enters `voting` (see technical-notes.md), but no client page lets a player actually cast post-session ratings yet — the dashboard/detail page currently only surface that voting has started. Also needs technical-notes.md's KI-008 fixed first (eligibility check clears once attendance is marked, exactly the real-world case this feature needs). | TBD |
 | Self-assessed weaknesses in onboarding quiz | Cut from v1's onboarding quiz — diagnostic rather than a skill-level signal, and nothing reads it yet. Worth adding back if a coaching/matching feature emerges that could consume it (e.g. Coach Discovery). | TBD |
 | CSP violation reporting endpoint | Collect `Content-Security-Policy-Report-Only` violation reports (`report-uri`/`report-to`) instead of relying on manual devtools QA during the report-only rollout. See technical-notes.md "Security Headers". | TBD |
 | CAPTCHA on signup/password-reset | hCaptcha or Turnstile via `supabase/config.toml`'s `[auth.captcha]` (currently commented out) — would close the gap that per-IP-only `[auth.rate_limit]` tuning can't (an attacker distributing attempts across many IPs). Needs a provider chosen and a site/secret key pair created — external-service decision, not something to do unilaterally. See technical-notes.md "Auth". | TBD |

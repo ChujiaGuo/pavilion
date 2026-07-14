@@ -24,7 +24,7 @@ import {
 
 export const sessionRouter = new Hono<{ Variables: { userId: string } }>();
 
-const VALID_STATUSES: SessionStatus[] = ['upcoming', 'active', 'completed', 'cancelled'];
+const VALID_STATUSES: SessionStatus[] = ['upcoming', 'active', 'voting', 'completed', 'cancelled'];
 const VALID_TYPES: SessionType[] = ['drop_in', 'organizer_hosted'];
 const VALID_FORMATS: SessionFormat[] = ['casual_rotation', 'king_of_the_court', 'round_robin'];
 const VALID_VISIBILITIES: SessionVisibility[] = ['public', 'invite_only'];

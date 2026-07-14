@@ -649,14 +649,14 @@ describe('progressSessionStatus', () => {
     expect(result).toEqual({ ok: true, session: expect.objectContaining({ status: 'active' }) });
   });
 
-  it('advances active → completed', async () => {
+  it('advances active → voting', async () => {
     mockFrom
       .mockReturnValueOnce(singleChain({ status: 'active', organizer_id: ORGANIZER_ID }) as any)
       .mockReturnValueOnce(singleChain(null) as any) // admin-role check
-      .mockReturnValueOnce(singleChain({ ...BASE_SESSION_ROW, status: 'completed' }) as any);
+      .mockReturnValueOnce(singleChain({ ...BASE_SESSION_ROW, status: 'voting' }) as any);
 
     const result = await progressSessionStatus(SESSION_ID, ORGANIZER_ID);
-    expect(result).toEqual({ ok: true, session: expect.objectContaining({ status: 'completed' }) });
+    expect(result).toEqual({ ok: true, session: expect.objectContaining({ status: 'voting' }) });
   });
 
   it('returns not_found when session does not exist', async () => {
@@ -679,9 +679,9 @@ describe('progressSessionStatus', () => {
     });
   });
 
-  it('returns invalid_transition for completed sessions', async () => {
+  it('returns invalid_transition for voting sessions (no exit from voting yet)', async () => {
     mockFrom
-      .mockReturnValueOnce(singleChain({ status: 'completed', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain({ status: 'voting', organizer_id: ORGANIZER_ID }) as any)
       .mockReturnValueOnce(singleChain(null) as any); // admin-role check
 
     expect(await progressSessionStatus(SESSION_ID, ORGANIZER_ID)).toEqual({
@@ -735,7 +735,7 @@ describe('progressSessionStatus', () => {
 // markAttendance
 // ---------------------------------------------------------------------------
 
-const COMPLETED_SESSION = { status: 'completed', organizer_id: ORGANIZER_ID };
+const VOTING_SESSION = { status: 'voting', organizer_id: ORGANIZER_ID };
 
 describe('markAttendance', () => {
   it('returns not_found when session does not exist', async () => {
@@ -748,7 +748,7 @@ describe('markAttendance', () => {
 
   it('returns forbidden when caller is not organizer', async () => {
     mockFrom
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any)
       .mockReturnValueOnce(singleChain(null) as any); // admin-role check — not moderator either
     expect(await markAttendance(SESSION_ID, 'other-user', [])).toEqual({
       ok: false,
@@ -756,13 +756,13 @@ describe('markAttendance', () => {
     });
   });
 
-  it('returns not_completed when session is not completed', async () => {
+  it('returns not_voting when the session has not entered the voting stage yet', async () => {
     mockFrom
-      .mockReturnValueOnce(singleChain({ status: 'upcoming', organizer_id: ORGANIZER_ID }) as any)
+      .mockReturnValueOnce(singleChain({ status: 'active', organizer_id: ORGANIZER_ID }) as any)
       .mockReturnValueOnce(singleChain(null) as any); // admin-role check
     expect(await markAttendance(SESSION_ID, ORGANIZER_ID, [])).toEqual({
       ok: false,
-      reason: 'not_completed',
+      reason: 'not_voting',
     });
   });
 
@@ -772,7 +772,7 @@ describe('markAttendance', () => {
     mockRpc.mockResolvedValue({ data: null, error: null } as any);
 
     mockFrom
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // session fetch
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any) // session fetch
       .mockReturnValueOnce(singleChain(null) as any) // admin-role check
       .mockReturnValueOnce(
         arrayChain([{ user_id: attendedId }, { user_id: noShowId }]) as any, // going RSVPs
@@ -794,7 +794,7 @@ describe('markAttendance', () => {
     const attendedId = 'user-1';
 
     mockFrom
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any)
       .mockReturnValueOnce(singleChain(null) as any) // admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any)
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any); // attended update only, affected rows
@@ -811,7 +811,7 @@ describe('markAttendance', () => {
     mockRpc.mockResolvedValueOnce({ data: null, error: new Error('rpc unavailable') } as any);
 
     mockFrom
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // session fetch
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any) // session fetch
       .mockReturnValueOnce(singleChain(null) as any) // admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any) // going RSVPs
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any); // no_show update affected rows
@@ -835,11 +835,11 @@ describe('markAttendance', () => {
     mockRpc.mockResolvedValue({ data: null, error: null } as any);
 
     mockFrom
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // call 1: session
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any) // call 1: session
       .mockReturnValueOnce(singleChain(null) as any) // call 1: admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any) // call 1: going RSVPs
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any) // call 1: no_show update actually affects the row
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // call 2: session
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any) // call 2: session
       .mockReturnValueOnce(singleChain(null) as any) // call 2: admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: noShowId }]) as any) // call 2: stale going read (race)
       .mockReturnValueOnce(arrayChain([]) as any); // call 2: no_show update affects nothing (already flipped)
@@ -857,9 +857,10 @@ describe('markAttendance', () => {
   });
 
   it('is idempotent — only processes going RSVPs, ignores already-processed ones', async () => {
-    // Empty going RSVPs (all already processed in a prior call)
+    // Empty going RSVPs (all already processed in a prior call) — the session
+    // stays 'voting' before and after, so a re-call is a natural no-op.
     mockFrom
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any)
       .mockReturnValueOnce(singleChain(null) as any) // admin-role check
       .mockReturnValueOnce(arrayChain([]) as any);
 
@@ -879,10 +880,10 @@ describe('markAttendance', () => {
     errorChain.resolveAs({ data: null, error: new Error('connection lost') });
 
     mockFrom
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)          // session fetch
-      .mockReturnValueOnce(singleChain(null) as any)                       // admin-role check
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any)          // session fetch
+      .mockReturnValueOnce(singleChain(null) as any)                    // admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }, { user_id: noShowId }]) as any) // going RSVPs
-      .mockReturnValueOnce(errorChain as any);                              // attended write FAILS
+      .mockReturnValueOnce(errorChain as any);                          // attended write FAILS
 
     const result = await markAttendance(SESSION_ID, ORGANIZER_ID, [attendedId]);
     expect(result).toEqual({ ok: false, reason: 'write_failed' });
@@ -895,7 +896,7 @@ describe('markAttendance', () => {
     const attendedId = 'user-attended';
     const auditChain = arrayChain([]);
     mockFrom
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any) // session fetch
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any) // session fetch
       .mockReturnValueOnce(singleChain({ role: 'moderator' }) as any) // admin-role check
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any) // going RSVPs
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any) // attended update
@@ -917,7 +918,7 @@ describe('markAttendance', () => {
   it('does not write an audit row when the organizer marks attendance for their own session', async () => {
     const attendedId = 'user-attended';
     mockFrom
-      .mockReturnValueOnce(singleChain(COMPLETED_SESSION) as any)
+      .mockReturnValueOnce(singleChain(VOTING_SESSION) as any)
       .mockReturnValueOnce(singleChain(null) as any) // admin-role check — not moderator
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any)
       .mockReturnValueOnce(arrayChain([{ user_id: attendedId }]) as any);

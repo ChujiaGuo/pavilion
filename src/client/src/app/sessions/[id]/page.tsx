@@ -423,6 +423,11 @@ export default function SessionDetailPage() {
       </section>
 
       <section className="mt-10 max-w-md">
+        {session.status === 'voting' && (
+          <p className="mb-2 text-neutral-600">
+            This session is in the voting stage. Rating players is coming soon.
+          </p>
+        )}
         {myRsvp?.status === 'attended' && <p className="text-primary">You attended this session.</p>}
         {myRsvp?.status === 'no_show' && <p className="text-neutral-500">Marked as a no-show.</p>}
 
@@ -513,7 +518,7 @@ export default function SessionDetailPage() {
                     ? 'Updating…'
                     : session.status === 'upcoming'
                       ? 'Start session'
-                      : 'Mark completed'}
+                      : 'End session'}
                 </Button>
               )}
               {isUpcoming && !confirmingCancelSession && (
@@ -554,7 +559,7 @@ export default function SessionDetailPage() {
             </div>
           )}
 
-          {session.status === 'completed' && (
+          {session.status === 'voting' && (
             <div className="mt-6">
               <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-neutral-500">
                 Mark attendance
@@ -585,7 +590,9 @@ export default function SessionDetailPage() {
                   </Button>
                 </div>
               ) : (
-                <p className="mt-2 text-neutral-500">No one had an active RSVP to mark.</p>
+                <p className="mt-2 text-neutral-500">
+                  No one has an active RSVP to mark — attendance may already be recorded.
+                </p>
               )}
             </div>
           )}

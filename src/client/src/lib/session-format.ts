@@ -31,6 +31,7 @@ export const SHUTTLE_POLICY_LABELS: Record<ShuttlePolicy, string> = {
 export const SESSION_STATUS_LABELS: Record<SessionStatus, string> = {
   upcoming: 'Upcoming',
   active: 'In progress',
+  voting: 'Voting',
   completed: 'Completed',
   cancelled: 'Cancelled',
 };
