@@ -20,6 +20,7 @@ vi.mock('../session.service.js', () => ({
   markAttendance: vi.fn(),
   joinSession: vi.fn(),
   cancelRsvp: vi.fn(),
+  removeRsvp: vi.fn(),
 }));
 
 import { supabase } from '../../../lib/supabase.js';
@@ -36,6 +37,7 @@ import {
   markAttendance,
   joinSession,
   cancelRsvp,
+  removeRsvp,
 } from '../session.service.js';
 import { sessionRouter } from '../session.router.js';
 
@@ -61,6 +63,7 @@ const mockJoinSession = vi.mocked(joinSession);
 const mockProgressSessionStatus = vi.mocked(progressSessionStatus);
 const mockMarkAttendance = vi.mocked(markAttendance);
 const mockCancelRsvp = vi.mocked(cancelRsvp);
+const mockRemoveRsvp = vi.mocked(removeRsvp);
 
 const USER_ID = 'user-1';
 const SESSION_ID = 'session-1';
@@ -674,6 +677,101 @@ describe('GET /:id/rsvps', () => {
 
     await sessionRouter.request(`/${SESSION_ID}/rsvps`, { headers: withAuth('attendee-1') });
     expect(mockGetSessionRsvps).toHaveBeenCalledWith(SESSION_ID, 'attendee-1', USER_ID);
+  });
+
+  describe('admin=true (moderator+ full roster)', () => {
+    it('returns 401 without a Bearer token', async () => {
+      mockGetSessionById.mockResolvedValue(BASE_SESSION as any);
+
+      const res = await sessionRouter.request(`/${SESSION_ID}/rsvps?admin=true`);
+      expect(res.status).toBe(401);
+      expect(mockGetSessionRsvps).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the caller is below moderator rank', async () => {
+      mockGetSessionById.mockResolvedValue(BASE_SESSION as any);
+      mockFrom.mockReturnValueOnce(singleChain({ role: 'venue_verifier' }) as any); // admin-role check
+
+      const res = await sessionRouter.request(`/${SESSION_ID}/rsvps?admin=true`, { headers: withAuth() });
+      expect(res.status).toBe(403);
+      expect(mockGetSessionRsvps).not.toHaveBeenCalled();
+    });
+
+    it('passes adminOverride through to getSessionRsvps for a moderator+ caller', async () => {
+      mockGetSessionById.mockResolvedValue(BASE_SESSION as any);
+      mockFrom.mockReturnValueOnce(singleChain({ role: 'moderator' }) as any); // admin-role check
+      mockGetSessionRsvps.mockResolvedValue([
+        { sessionId: SESSION_ID, userId: 'user-2', status: 'no_show', joinedAt: '2030-01-05T00:00:00Z' },
+      ]);
+
+      const res = await sessionRouter.request(`/${SESSION_ID}/rsvps?admin=true`, { headers: withAuth() });
+      expect(res.status).toBe(200);
+      expect((await res.json()).rsvps).toHaveLength(1);
+      expect(mockGetSessionRsvps).toHaveBeenCalledWith(SESSION_ID, USER_ID, USER_ID, true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /:id/rsvps/:userId
+// ---------------------------------------------------------------------------
+
+describe('DELETE /:id/rsvps/:userId', () => {
+  it('returns 401 without auth', async () => {
+    const res = await sessionRouter.request(`/${SESSION_ID}/rsvps/${USER_ID}`, { method: 'DELETE' });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 200 on successful removal', async () => {
+    mockRemoveRsvp.mockResolvedValue({ ok: true });
+
+    const res = await sessionRouter.request(`/${SESSION_ID}/rsvps/${USER_ID}`, {
+      method: 'DELETE',
+      headers: withAuth(),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).success).toBe(true);
+    expect(mockRemoveRsvp).toHaveBeenCalledWith(SESSION_ID, USER_ID, USER_ID);
+  });
+
+  it('returns 403 when caller is not moderator+', async () => {
+    mockRemoveRsvp.mockResolvedValue({ ok: false, reason: 'forbidden' });
+
+    const res = await sessionRouter.request(`/${SESSION_ID}/rsvps/${USER_ID}`, {
+      method: 'DELETE',
+      headers: withAuth(),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 404 when session not found', async () => {
+    mockRemoveRsvp.mockResolvedValue({ ok: false, reason: 'not_found' });
+
+    const res = await sessionRouter.request(`/${SESSION_ID}/rsvps/${USER_ID}`, {
+      method: 'DELETE',
+      headers: withAuth(),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 409 when the session is no longer upcoming', async () => {
+    mockRemoveRsvp.mockResolvedValue({ ok: false, reason: 'not_upcoming' });
+
+    const res = await sessionRouter.request(`/${SESSION_ID}/rsvps/${USER_ID}`, {
+      method: 'DELETE',
+      headers: withAuth(),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it('returns 409 when the target user has no active RSVP', async () => {
+    mockRemoveRsvp.mockResolvedValue({ ok: false, reason: 'not_rsvped' });
+
+    const res = await sessionRouter.request(`/${SESSION_ID}/rsvps/${USER_ID}`, {
+      method: 'DELETE',
+      headers: withAuth(),
+    });
+    expect(res.status).toBe(409);
   });
 });
 

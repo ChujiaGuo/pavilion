@@ -18,6 +18,14 @@ const STATUS_OPTIONS: SessionStatus[] = ['upcoming', 'active', 'completed', 'can
 // Search button.
 const SEARCH_DEBOUNCE_MS = 400;
 
+const RSVP_STATUS_LABELS: Record<SessionRsvp['status'], string> = {
+  going: 'Going',
+  waitlisted: 'Waitlisted',
+  cancelled: 'Cancelled',
+  attended: 'Attended',
+  no_show: 'No-show',
+};
+
 interface EditFields {
   venueName: string;
   skillMin: string;
@@ -50,6 +58,11 @@ export function AdminSessionsPanel({ accessToken }: { accessToken: string }) {
   const [isSaving, setIsSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const [players, setPlayers] = useState<SessionRsvp[] | null>(null);
+  const [isLoadingPlayers, setIsLoadingPlayers] = useState(false);
+  const [playersError, setPlayersError] = useState<string | null>(null);
+  const [removingUserId, setRemovingUserId] = useState<string | null>(null);
+
   useEffect(() => {
     const serialized = JSON.stringify({ query, status });
     if (serialized === lastSearchedRef.current) return;
@@ -78,6 +91,31 @@ export function AdminSessionsPanel({ accessToken }: { accessToken: string }) {
     setEditingId(session.id);
     setFields(toEditFields(session));
     setActionError(null);
+
+    setPlayers(null);
+    setPlayersError(null);
+    setIsLoadingPlayers(true);
+    apiGet<{ rsvps: SessionRsvp[] }>(`/api/sessions/${session.id}/rsvps?admin=true`, accessToken)
+      .then((res) => setPlayers(res.rsvps))
+      .catch(() => setPlayersError('Failed to load players.'))
+      .finally(() => setIsLoadingPlayers(false));
+  }
+
+  // Removal is restricted to upcoming sessions server-side too (removeRsvp) —
+  // active/completed sessions have real attendance history that removing a
+  // player would silently rewrite, so the row simply has no Remove button
+  // once a session progresses past upcoming.
+  async function handleRemovePlayer(session: Session, userId: string) {
+    setPlayersError(null);
+    setRemovingUserId(userId);
+    try {
+      await apiDelete(`/api/sessions/${session.id}/rsvps/${userId}`, accessToken);
+      setPlayers((prev) => prev && prev.filter((p) => p.userId !== userId));
+    } catch (err) {
+      setPlayersError(apiErrorMessage(err, 'Failed to remove player.'));
+    } finally {
+      setRemovingUserId(null);
+    }
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -170,99 +208,137 @@ export function AdminSessionsPanel({ accessToken }: { accessToken: string }) {
         {results.map((session) => (
           <li key={session.id}>
             {editingId === session.id && fields ? (
-              <form onSubmit={handleSave} className="max-w-sm space-y-4 py-4">
-                <p className="flex items-center gap-1.5 text-xs text-neutral-500">
-                  <RequiredMarker /> indicates a required field
+              <div className="max-w-sm space-y-6 py-4">
+                <p className="text-xs text-neutral-500">
+                  Session ID: <span className="font-mono">{session.id}</span>
                 </p>
-                <div className="space-y-2">
-                  <Label htmlFor={`venueName-${session.id}`}>
-                    Venue name
-                    <RequiredMarker />
-                  </Label>
-                  <Input
-                    id={`venueName-${session.id}`}
-                    required
-                    value={fields.venueName}
-                    onChange={(e) => setFields({ ...fields, venueName: e.target.value })}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+
+                <form onSubmit={handleSave} className="space-y-4">
+                  <p className="flex items-center gap-1.5 text-xs text-neutral-500">
+                    <RequiredMarker /> indicates a required field
+                  </p>
                   <div className="space-y-2">
-                    <Label htmlFor={`skillMin-${session.id}`}>
-                      Skill min
+                    <Label htmlFor={`venueName-${session.id}`}>
+                      Venue name
                       <RequiredMarker />
                     </Label>
                     <Input
-                      id={`skillMin-${session.id}`}
-                      type="number"
-                      step="0.25"
+                      id={`venueName-${session.id}`}
                       required
-                      value={fields.skillMin}
-                      onChange={(e) => setFields({ ...fields, skillMin: e.target.value })}
+                      value={fields.venueName}
+                      onChange={(e) => setFields({ ...fields, venueName: e.target.value })}
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor={`skillMin-${session.id}`}>
+                        Skill min
+                        <RequiredMarker />
+                      </Label>
+                      <Input
+                        id={`skillMin-${session.id}`}
+                        type="number"
+                        step="0.25"
+                        required
+                        value={fields.skillMin}
+                        onChange={(e) => setFields({ ...fields, skillMin: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor={`skillMax-${session.id}`}>
+                        Skill max
+                        <RequiredMarker />
+                      </Label>
+                      <Input
+                        id={`skillMax-${session.id}`}
+                        type="number"
+                        step="0.25"
+                        required
+                        value={fields.skillMax}
+                        onChange={(e) => setFields({ ...fields, skillMax: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor={`courtCount-${session.id}`}>
+                        Court count
+                        <RequiredMarker />
+                      </Label>
+                      <Input
+                        id={`courtCount-${session.id}`}
+                        type="number"
+                        min="1"
+                        required
+                        value={fields.courtCount}
+                        onChange={(e) => setFields({ ...fields, courtCount: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor={`maxPlayers-${session.id}`}>
+                        Max players
+                        <RequiredMarker />
+                      </Label>
+                      <Input
+                        id={`maxPlayers-${session.id}`}
+                        type="number"
+                        min="1"
+                        required
+                        value={fields.maxPlayers}
+                        onChange={(e) => setFields({ ...fields, maxPlayers: e.target.value })}
+                      />
+                    </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor={`skillMax-${session.id}`}>
-                      Skill max
-                      <RequiredMarker />
-                    </Label>
+                    <Label htmlFor={`notes-${session.id}`}>Notes</Label>
                     <Input
-                      id={`skillMax-${session.id}`}
-                      type="number"
-                      step="0.25"
-                      required
-                      value={fields.skillMax}
-                      onChange={(e) => setFields({ ...fields, skillMax: e.target.value })}
+                      id={`notes-${session.id}`}
+                      value={fields.notes}
+                      onChange={(e) => setFields({ ...fields, notes: e.target.value })}
                     />
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor={`courtCount-${session.id}`}>
-                      Court count
-                      <RequiredMarker />
-                    </Label>
-                    <Input
-                      id={`courtCount-${session.id}`}
-                      type="number"
-                      min="1"
-                      required
-                      value={fields.courtCount}
-                      onChange={(e) => setFields({ ...fields, courtCount: e.target.value })}
-                    />
+                  <div className="flex items-center gap-3">
+                    <Button type="submit" disabled={isSaving}>
+                      {isSaving ? 'Saving…' : 'Save changes'}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => setEditingId(null)}>
+                      Cancel
+                    </Button>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor={`maxPlayers-${session.id}`}>
-                      Max players
-                      <RequiredMarker />
-                    </Label>
-                    <Input
-                      id={`maxPlayers-${session.id}`}
-                      type="number"
-                      min="1"
-                      required
-                      value={fields.maxPlayers}
-                      onChange={(e) => setFields({ ...fields, maxPlayers: e.target.value })}
-                    />
-                  </div>
+                </form>
+
+                <div className="space-y-3 border-t border-border pt-4">
+                  <p className="text-sm font-semibold uppercase tracking-[0.15em] text-neutral-500">Players</p>
+                  {isLoadingPlayers ? (
+                    <p className="text-sm text-neutral-500">Loading players…</p>
+                  ) : players && players.length > 0 ? (
+                    <ul className="space-y-2">
+                      {players.map((p) => (
+                        <li key={p.userId} className="flex items-center justify-between gap-3 text-sm">
+                          <div>
+                            <p className="font-medium">{p.displayName ?? p.userId}</p>
+                            <p className="text-xs text-neutral-500">{RSVP_STATUS_LABELS[p.status]}</p>
+                          </div>
+                          {session.status === 'upcoming' && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="destructive"
+                              disabled={removingUserId === p.userId}
+                              onClick={() => handleRemovePlayer(session, p.userId)}
+                            >
+                              {removingUserId === p.userId ? 'Removing…' : 'Remove'}
+                            </Button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-neutral-500">No players.</p>
+                  )}
+                  {playersError && <p className="text-sm text-destructive">{playersError}</p>}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor={`notes-${session.id}`}>Notes</Label>
-                  <Input
-                    id={`notes-${session.id}`}
-                    value={fields.notes}
-                    onChange={(e) => setFields({ ...fields, notes: e.target.value })}
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <Button type="submit" disabled={isSaving}>
-                    {isSaving ? 'Saving…' : 'Save changes'}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => setEditingId(null)}>
-                    Cancel
-                  </Button>
-                </div>
-              </form>
+              </div>
             ) : (
               <div
                 role="button"

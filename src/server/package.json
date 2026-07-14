@@ -15,7 +15,7 @@
     "seed:sessions": "tsx --env-file=.env.local src/scripts/seed-sessions.ts",
     "seed:admins": "tsx --env-file=.env.local src/scripts/seed-admins.ts",
     "seed:venues": "tsx --env-file=.env.local src/scripts/seed-venues.ts",
-    "seed:all": "npm run seed:admins && npm run seed:sessions && npm run seed:venues",
+    "seed:all": "npm run seed:venues && npm run seed:sessions && npm run seed:admins",
     "invite:prod": "tsx --env-file=.env.prod.local src/scripts/invite-user.ts",
     "make-owner:prod": "tsx --env-file=.env.prod.local src/scripts/make-owner.ts"
   },

@@ -1,6 +1,6 @@
 # Technical Notes
 
-_Last updated: 2026-07-07_
+_Last updated: 2026-07-13 (added moderator+ session-roster admin view (`GET /:id/rsvps?admin=true`) and player removal (`DELETE /:id/rsvps/:userId`, upcoming-only) to the session domain — see "Admin & Roles")_
 
 See `brainstorm.md` for product/idea context, `misc-tech-notes.md` for one-time decisions/historical notes/implementation footnotes, `database-schema.md` for full table definitions.
 
@@ -74,6 +74,8 @@ if (!isModerator) query = query.eq('organizer_id', userId);
 ```
 Every domain follows this same pattern for its own admin-gated actions (search/edit users, search/edit sessions, adjust ratings, create/edit venues), writing a best-effort audit row (`admin_user_edits`/`admin_session_edits`/`admin_venue_edits`/`rating_history.performed_by`) on the admin-override branch. `GET /api/admin/history` merges all of these plus `admin_role_changes` into one role-scoped feed. Per-domain implementation detail, the History tab's diff mechanics, and the verification-toggle flow are in misc-tech-notes.md's Admin & Roles section.
 
+**Removing another player's RSVP (`removeRsvp`, `DELETE /api/sessions/:id/rsvps/:userId`) is moderator+ only with no self-service equivalent** — unlike the widen-the-`WHERE`-clause shape above, this action has no organizer branch at all (organizers can't remove attendees themselves in v1), and it's further restricted to `upcoming` sessions only (no rewriting `active`/`completed` attendance history) and skips the late-cancel reliability penalty entirely, since that penalty represents the player's own choice to bail, not a moderator's. Always writes an `admin_session_edits` row (`action: 'remove_rsvp'`) since there's no non-admin branch to compare against.
+
 ---
 
 ## API Endpoints
@@ -105,11 +107,12 @@ All routes mounted under `/api/<domain>`. **Auth** `yes` = Bearer token required
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `DELETE` | `/:id` | yes (organizer/moderator+) | Cancel (`upcoming` sessions only) |
-| `DELETE` | `/:id/rsvp` | yes | Cancel RSVP; promotes oldest waitlisted RSVP; 5-point reliability penalty within 12h of start |
+| `DELETE` | `/:id/rsvp` | yes | Cancel own RSVP; promotes oldest waitlisted RSVP; 5-point reliability penalty within 12h of start |
+| `DELETE` | `/:id/rsvps/:userId` | yes (moderator+) | Remove another player's RSVP; `upcoming` sessions only, no reliability penalty; promotes oldest waitlisted RSVP same as self-cancel |
 | `GET` | `/` | no (moderator+ for `admin=true`) | List/search sessions; `public`-only unless the caller owns the session or passes an exact `id`; `admin=true` bypasses all visibility rules, capped 50 rows |
 | `GET` | `/:id` | conditional | Get session + `organizerName`; `invite_only` requires a valid Bearer token |
 | `GET` | `/:id/rsvp` | yes | Caller's own RSVP status |
-| `GET` | `/:id/rsvps` | conditional | List active RSVPs with `displayName`; names visible to shared participants regardless of privacy, else `public`-only |
+| `GET` | `/:id/rsvps` | conditional (moderator+ for `admin=true`) | List active RSVPs with `displayName`; names visible to shared participants regardless of privacy, else `public`-only; `admin=true` returns every RSVP status (including `cancelled`/`attended`/`no_show`) and every name regardless of privacy |
 | `PATCH` | `/:id` | yes (organizer/moderator+) | Update fields; re-validates the skill-range invariant even on a single-bound patch |
 | `PATCH` | `/:id/status` | yes (organizer/moderator+) | Advance `upcoming → active → completed`; 409 on invalid transitions |
 | `POST` | `/` | yes | Create session; skill range validated against the `numeric(4,2)` column ceiling; returns `warning: "skill_range_wide"` if organizer grade is far from the range |

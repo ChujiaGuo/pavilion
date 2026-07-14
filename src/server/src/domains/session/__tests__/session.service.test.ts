@@ -23,6 +23,7 @@ import {
   markAttendance,
   joinSession,
   cancelRsvp,
+  removeRsvp,
 } from '../session.service.js';
 
 // ---------------------------------------------------------------------------
@@ -1362,6 +1363,99 @@ describe('cancelRsvp', () => {
 });
 
 // ---------------------------------------------------------------------------
+// removeRsvp
+// ---------------------------------------------------------------------------
+
+describe('removeRsvp', () => {
+  it('returns forbidden when caller is not moderator+', async () => {
+    mockFrom.mockReturnValueOnce(singleChain({ role: null }) as any);
+
+    const result = await removeRsvp(SESSION_ID, USER_ID, 'not-a-mod');
+    expect(result).toEqual({ ok: false, reason: 'forbidden' });
+    expect(mockFrom).toHaveBeenCalledTimes(1);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('returns not_found when session does not exist', async () => {
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'moderator' }) as any)
+      .mockReturnValueOnce(singleChain(null) as any);
+
+    const result = await removeRsvp(SESSION_ID, USER_ID, 'mod-1');
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('returns not_upcoming when the session has already started', async () => {
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'moderator' }) as any)
+      .mockReturnValueOnce(singleChain({ status: 'active' }) as any);
+
+    const result = await removeRsvp(SESSION_ID, USER_ID, 'mod-1');
+    expect(result).toEqual({ ok: false, reason: 'not_upcoming' });
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('returns not_rsvped when the target user has no active RSVP', async () => {
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'moderator' }) as any)
+      .mockReturnValueOnce(singleChain({ status: 'upcoming' }) as any);
+    mockRpc.mockResolvedValueOnce({ data: 'not_rsvped', error: null } as any);
+
+    const result = await removeRsvp(SESSION_ID, USER_ID, 'mod-1');
+    expect(result).toEqual({ ok: false, reason: 'not_rsvped' });
+  });
+
+  it('removes a going RSVP, promotes the waitlist, and writes an audit row without a reliability penalty', async () => {
+    const roleChain = singleChain({ role: 'moderator' });
+    const sessionChain = singleChain({ status: 'upcoming' });
+    const auditChain = arrayChain([]);
+    mockFrom
+      .mockReturnValueOnce(roleChain as any)
+      .mockReturnValueOnce(sessionChain as any)
+      .mockReturnValueOnce(auditChain as any);
+    mockRpc.mockResolvedValueOnce({ data: 'going', error: null } as any);
+
+    const result = await removeRsvp(SESSION_ID, USER_ID, 'mod-1');
+    expect(result).toEqual({ ok: true });
+    expect(mockRpc).toHaveBeenCalledTimes(1); // cancel_rsvp_and_promote only — no decrement_reliability_score
+    expect(mockRpc).toHaveBeenCalledWith('cancel_rsvp_and_promote', {
+      p_session_id: SESSION_ID,
+      p_user_id: USER_ID,
+    });
+    expect(auditChain['insert']).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      performed_by: 'mod-1',
+      action: 'remove_rsvp',
+      changes: [
+        { field: 'removedUserId', before: USER_ID, after: null },
+        { field: 'rsvpStatus', before: 'going', after: 'cancelled' },
+      ],
+    });
+  });
+
+  it('removes a waitlisted RSVP and still logs the audit row', async () => {
+    const auditChain = arrayChain([]);
+    mockFrom
+      .mockReturnValueOnce(singleChain({ role: 'admin' }) as any)
+      .mockReturnValueOnce(singleChain({ status: 'upcoming' }) as any)
+      .mockReturnValueOnce(auditChain as any);
+    mockRpc.mockResolvedValueOnce({ data: 'waitlisted', error: null } as any);
+
+    const result = await removeRsvp(SESSION_ID, USER_ID, 'admin-1');
+    expect(result).toEqual({ ok: true });
+    expect(auditChain['insert']).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changes: [
+          { field: 'removedUserId', before: USER_ID, after: null },
+          { field: 'rsvpStatus', before: 'waitlisted', after: 'cancelled' },
+        ],
+      }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getSessionRsvps
 // ---------------------------------------------------------------------------
 
@@ -1452,6 +1546,43 @@ describe('getSessionRsvps', () => {
 
     const rsvps = await getSessionRsvps(SESSION_ID, 'some-outsider', ORGANIZER_ID);
     expect(rsvps).toHaveLength(0);
+  });
+
+  describe('adminOverride (moderator+ view)', () => {
+    it('includes cancelled/attended/no_show rows, not just going/waitlisted', async () => {
+      const rows = [
+        { session_id: SESSION_ID, user_id: USER_ID, status: 'attended', joined_at: '2030-01-05T00:00:00Z' },
+        { session_id: SESSION_ID, user_id: 'user-2', status: 'no_show', joined_at: '2030-01-06T00:00:00Z' },
+        { session_id: SESSION_ID, user_id: 'user-3', status: 'cancelled', joined_at: '2030-01-07T00:00:00Z' },
+      ];
+      const rsvpChain = arrayChain(rows);
+      const profileChain = arrayChain([
+        { id: USER_ID, privacy_level: 'public' },
+        { id: 'user-2', privacy_level: 'public' },
+        { id: 'user-3', privacy_level: 'public' },
+      ]);
+      mockFrom.mockReturnValueOnce(rsvpChain as any).mockReturnValueOnce(profileChain as any);
+
+      const rsvps = await getSessionRsvps(SESSION_ID, undefined, undefined, true);
+      expect(rsvps).toHaveLength(3);
+      // The going/waitlisted-only filter is skipped entirely in admin mode.
+      expect(rsvpChain['in']).not.toHaveBeenCalled();
+    });
+
+    it('includes private-profile users\' names for a non-participant caller', async () => {
+      const rows = [
+        { session_id: SESSION_ID, user_id: 'user-2', status: 'going', joined_at: '2030-01-05T00:00:00Z' },
+      ];
+      const rsvpChain = arrayChain(rows);
+      const profileChain = arrayChain([
+        { id: 'user-2', display_name: 'Private Player', privacy_level: 'private' },
+      ]);
+      mockFrom.mockReturnValueOnce(rsvpChain as any).mockReturnValueOnce(profileChain as any);
+
+      const rsvps = await getSessionRsvps(SESSION_ID, 'some-outsider', ORGANIZER_ID, true);
+      expect(rsvps).toHaveLength(1);
+      expect(rsvps[0]).toMatchObject({ displayName: 'Private Player' });
+    });
   });
 });
 

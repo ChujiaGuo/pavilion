@@ -1,6 +1,6 @@
 # Database Schema
 
-_Last updated: 2026-07-03 (added the unified admin History tab: `admin_user_edits`, `admin_session_edits`, `admin_venue_edits` tables with a `changes` jsonb column each, and a `rating_history.performed_by` column; `profiles.verified_tier`/`rating_floor` now have a write path via `PATCH /api/users/:id/verify` — see technical-notes.md "Admin & Roles")_
+_Last updated: 2026-07-13 (added `admin_session_edits`' `'remove_rsvp'` action, written by the new moderator+ `DELETE /api/sessions/:id/rsvps/:userId` endpoint — see technical-notes.md "Admin & Roles")_
 
 PostgreSQL via Supabase. PostGIS extension enabled.
 
@@ -85,8 +85,8 @@ Audit trail for moderator+ profile edits (`PATCH /api/users/:id` when the caller
 | `id` | uuid PK | |
 | `session_id` | uuid | FK → sessions |
 | `performed_by` | uuid | FK → profiles |
-| `action` | text | `'edit'`, `'cancel'`, `'advance_status'`, `'mark_attendance'`. No CHECK constraint — same app-layer-enforced-enum convention as `admins.role` |
-| `changes` | jsonb | nullable. Array of `{ field, before, after }`. `edit`: one entry per patched `Session` field. `cancel`/`advance_status`: a single synthetic `status` entry (e.g. `upcoming` → `active`). `mark_attendance`: synthetic `attended`/`noShows` entries (`before: null`, `after: <count>` — there's no prior count to diff against) |
+| `action` | text | `'edit'`, `'cancel'`, `'advance_status'`, `'mark_attendance'`, `'remove_rsvp'`. No CHECK constraint — same app-layer-enforced-enum convention as `admins.role` |
+| `changes` | jsonb | nullable. Array of `{ field, before, after }`. `edit`: one entry per patched `Session` field. `cancel`/`advance_status`: a single synthetic `status` entry (e.g. `upcoming` → `active`). `mark_attendance`: synthetic `attended`/`noShows` entries (`before: null`, `after: <count>` — there's no prior count to diff against). `remove_rsvp`: synthetic `removedUserId`/`rsvpStatus` entries |
 | `created_at` | timestamptz | |
 
 Audit trail for moderator+ session overrides (`updateSession`/`cancelSession`/`progressSessionStatus`/`markAttendance` in `session.service.ts`, only on the branch that skips the organizer-ownership check). Organizer self-actions are never logged here. See technical-notes.md "Admin & Roles".

@@ -15,9 +15,11 @@ import {
   markAttendance,
   joinSession,
   cancelRsvp,
+  removeRsvp,
   type JoinResult,
   type ProgressStatusResult,
   type UpdateSessionResult,
+  type RemoveRsvpResult,
 } from './session.service.js';
 
 export const sessionRouter = new Hono<{ Variables: { userId: string } }>();
@@ -60,6 +62,13 @@ const PROGRESS_REASON_STATUS: Record<
 const UPDATE_REASON_STATUS: Record<Extract<UpdateSessionResult, { ok: false }>['reason'], 400 | 404> = {
   not_found: 404,
   invalid_skill_range: 400,
+};
+
+const REMOVE_RSVP_REASON_STATUS: Record<Extract<RemoveRsvpResult, { ok: false }>['reason'], 403 | 404 | 409> = {
+  not_found: 404,
+  forbidden: 403,
+  not_upcoming: 409,
+  not_rsvped: 409,
 };
 
 // Validates whichever of these fields are present — every field is optional
@@ -378,6 +387,18 @@ sessionRouter.get('/:id/rsvps', async (c) => {
   const session = await getSessionById(c.req.param('id'));
   if (!session) return c.json({ error: 'Not found' }, 404);
 
+  // admin=true — moderator+ view, returns every RSVP status (including
+  // cancelled/attended/no_show) and every display name regardless of
+  // privacy_level, same admin-override convention as GET / `admin=true`.
+  if (c.req.query('admin') === 'true') {
+    const requestingUserId = await getOptionalUserId(c);
+    if (!requestingUserId) return c.json({ error: 'Unauthorized' }, 401);
+    const role = await getAdminRole(requestingUserId);
+    if (!roleAtLeast(role, 'moderator')) return c.json({ error: 'Forbidden' }, 403);
+    const rsvps = await getSessionRsvps(session.id, requestingUserId, session.organizerId, true);
+    return c.json({ rsvps });
+  }
+
   const requestingUserId = await getOptionalUserId(c);
 
   if (session.visibility === 'invite_only' && !requestingUserId) {
@@ -423,4 +444,17 @@ sessionRouter.delete('/:id/rsvp', auth, async (c) => {
     return c.json({ error: result.reason }, result.reason === 'not_found' ? 404 : 409);
   }
   return c.json({ success: true, ...(result.warning ? { warning: result.warning } : {}) });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /:id/rsvps/:userId — moderator+ removes another player's RSVP
+// (upcoming sessions only)
+// ---------------------------------------------------------------------------
+
+sessionRouter.delete('/:id/rsvps/:userId', auth, async (c) => {
+  const result = await removeRsvp(c.req.param('id'), c.req.param('userId'), c.get('userId'));
+  if (!result.ok) {
+    return c.json({ error: result.reason }, REMOVE_RSVP_REASON_STATUS[result.reason]);
+  }
+  return c.json({ success: true });
 });

@@ -3,8 +3,14 @@
 // the `/venues/[id]` detail page, and the VenuePicker used by session
 // creation). Safe to re-run — it deletes and recreates everything it owns
 // (matched by the "[SEED]" name prefix, same convention seed-sessions.ts
-// uses for its venue names) before inserting fresh data, rather than
+// uses for its own seed accounts) before inserting fresh data, rather than
 // accumulating duplicates.
+//
+// seed-sessions.ts's sessions link to these venues by id and by these exact
+// names, so run this script BEFORE seed-sessions.ts (or via `npm run
+// seed:all`, which already orders it first) and re-run seed-sessions.ts
+// afterward if you re-run this one standalone — this script's cleanup
+// deletes any sessions pointed at the venues it's about to remove.
 //
 // Usage (from src/server): npm run seed:venues
 //
@@ -35,14 +41,21 @@ interface SeedVenueSpec {
   hours: ({ open: string; close: string } | null)[];
 }
 
-// Rockville/Bethesda MD coordinates, matching the cities seed-sessions.ts
-// already uses, so nearby-search testing has a realistic cluster to query
-// against rather than points scattered across the globe.
+// Rockville/Bethesda/Silver Spring/Wheaton/Germantown MD coordinates cluster,
+// matching the cities seed-sessions.ts already uses, so nearby-search testing
+// has a realistic cluster to query against rather than points scattered
+// across the globe (Fairfax, VA is the deliberate outlier below). Street
+// addresses are all generic "Test Address N" placeholders — these are mock
+// venues, not real locations, so there's no value in fabricating realistic
+// street names. Playing conditions (court_count, surface_type, shuttle_type,
+// drop_in_available, reservation_required) are deliberately varied across all
+// ten so venue-diversity testing (filters, cards, detail page) has real
+// spread to exercise rather than near-duplicate rows.
 const VENUES: SeedVenueSpec[] = [
   {
     name: `${SEED_PREFIX} Rockville Badminton Club`,
     type: 'club',
-    address: '1 Redland Blvd',
+    address: 'Test Address 1',
     city: 'Rockville',
     region: 'MD',
     lat: 39.0840,
@@ -68,7 +81,7 @@ const VENUES: SeedVenueSpec[] = [
   {
     name: `${SEED_PREFIX} Bethesda Community Rec Center`,
     type: 'rec_center',
-    address: '4805 Edgemoor Ln',
+    address: 'Test Address 2',
     city: 'Bethesda',
     region: 'MD',
     lat: 38.9807,
@@ -94,7 +107,7 @@ const VENUES: SeedVenueSpec[] = [
   {
     name: `${SEED_PREFIX} Twinbrook Community Center`,
     type: 'community_center',
-    address: '12920 Twinbrook Pkwy',
+    address: 'Test Address 3',
     city: 'Rockville',
     region: 'MD',
     lat: 39.0662,
@@ -120,7 +133,7 @@ const VENUES: SeedVenueSpec[] = [
   {
     name: `${SEED_PREFIX} Pulse Fitness & Racquet Club`,
     type: 'gym',
-    address: '7272 Wisconsin Ave',
+    address: 'Test Address 4',
     city: 'Bethesda',
     region: 'MD',
     lat: 38.9847,
@@ -146,7 +159,7 @@ const VENUES: SeedVenueSpec[] = [
   {
     name: `${SEED_PREFIX} Shady Grove Outdoor Courts`,
     type: 'community_center',
-    address: '16220 Shady Grove Rd',
+    address: 'Test Address 5',
     city: 'Rockville',
     region: 'MD',
     lat: 39.1090,
@@ -173,7 +186,7 @@ const VENUES: SeedVenueSpec[] = [
   {
     name: `${SEED_PREFIX} Elite Smash Academy`,
     type: 'club',
-    address: '9020 Rothbury Dr',
+    address: 'Test Address 6',
     city: 'Rockville',
     region: 'MD',
     lat: 39.0450,
@@ -199,7 +212,7 @@ const VENUES: SeedVenueSpec[] = [
   {
     name: `${SEED_PREFIX} Far Out Fairfax Fieldhouse`,
     type: 'rec_center',
-    address: '3730 Old Lee Hwy',
+    address: 'Test Address 7',
     city: 'Fairfax',
     region: 'VA',
     // Well outside the Rockville/Bethesda cluster — for exercising the
@@ -225,12 +238,98 @@ const VENUES: SeedVenueSpec[] = [
       { open: '09:00', close: '20:00' },
     ],
   },
+  {
+    name: `${SEED_PREFIX} Silver Spring Shuttle House`,
+    type: 'club',
+    address: 'Test Address 8',
+    city: 'Silver Spring',
+    region: 'MD',
+    lat: 38.9907,
+    lng: -77.0261,
+    courtCount: 4,
+    surfaceType: 'wood',
+    shuttleType: 'both',
+    dropInAvailable: true,
+    reservationRequired: true,
+    contactPhone: '301-555-0106',
+    contactWebsite: 'https://silverspringshuttle.example.test',
+    bookingUrl: 'https://silverspringshuttle.example.test/book',
+    hours: [
+      { open: '08:00', close: '20:00' },
+      { open: '06:00', close: '22:00' },
+      { open: '06:00', close: '22:00' },
+      { open: '06:00', close: '22:00' },
+      { open: '06:00', close: '22:00' },
+      { open: '06:00', close: '22:00' },
+      { open: '08:00', close: '20:00' },
+    ],
+  },
+  {
+    name: `${SEED_PREFIX} Wheaton Community Courts`,
+    type: 'community_center',
+    address: 'Test Address 9',
+    city: 'Wheaton',
+    region: 'MD',
+    lat: 39.0396,
+    lng: -77.0553,
+    courtCount: 3,
+    surfaceType: 'concrete',
+    shuttleType: 'feather',
+    dropInAvailable: true,
+    reservationRequired: false,
+    contactPhone: null,
+    contactWebsite: null,
+    bookingUrl: null,
+    hours: [
+      { open: '10:00', close: '19:00' },
+      { open: '07:00', close: '21:00' },
+      { open: '07:00', close: '21:00' },
+      { open: '07:00', close: '21:00' },
+      { open: '07:00', close: '21:00' },
+      { open: '07:00', close: '21:00' },
+      { open: '10:00', close: '19:00' },
+    ],
+  },
+  {
+    name: `${SEED_PREFIX} Germantown Gym & Fitness`,
+    type: 'gym',
+    address: 'Test Address 10',
+    city: 'Germantown',
+    region: 'MD',
+    lat: 39.1732,
+    lng: -77.2717,
+    // Smallest venue in the seed set — a single-court edge case for UI that
+    // assumes multi-court venues.
+    courtCount: 1,
+    surfaceType: 'outdoor',
+    shuttleType: 'plastic',
+    dropInAvailable: false,
+    reservationRequired: true,
+    contactPhone: '301-555-0107',
+    contactWebsite: 'https://germantowngym.example.test',
+    bookingUrl: null,
+    hours: [
+      null,
+      { open: '05:30', close: '22:00' },
+      { open: '05:30', close: '22:00' },
+      { open: '05:30', close: '22:00' },
+      { open: '05:30', close: '22:00' },
+      { open: '05:30', close: '22:00' },
+      { open: '08:00', close: '18:00' },
+    ],
+  },
 ];
 
 async function deleteExistingSeedData() {
   // venue_hours/venue_date_exceptions/venue_edit_suggestions/admin_venue_edits
   // all reference venues with ON DELETE CASCADE (see database-schema.md), so
-  // deleting the venues themselves is enough to clear all of it.
+  // those clear on their own. sessions.venue_id does NOT cascade (nullable
+  // FK, no ON DELETE clause — see the initial-schema migration), so
+  // seed-sessions.ts's sessions (which link to these venues by id) must be
+  // deleted first or this delete fails with a FK violation. Same story one
+  // level deeper: admin_session_edits.session_id also has no cascade, so any
+  // audit row logged against one of these sessions (e.g. from exercising the
+  // admin sessions panel) must be cleared before the session delete too.
   const { data: existing, error: selectError } = await supabase
     .from('venues')
     .select('id')
@@ -238,13 +337,27 @@ async function deleteExistingSeedData() {
   if (selectError) throw selectError;
   if (!existing || existing.length === 0) return;
 
-  const { error: deleteError } = await supabase
-    .from('venues')
-    .delete()
-    .in('id', existing.map((v) => v.id));
+  const venueIds = existing.map((v) => v.id);
+
+  const { data: linkedSessions, error: sessionSelectError } = await supabase
+    .from('sessions')
+    .select('id')
+    .in('venue_id', venueIds);
+  if (sessionSelectError) throw sessionSelectError;
+
+  if (linkedSessions && linkedSessions.length > 0) {
+    const sessionIds = linkedSessions.map((s) => s.id);
+    const { error: deleteAuditError } = await supabase.from('admin_session_edits').delete().in('session_id', sessionIds);
+    if (deleteAuditError) throw deleteAuditError;
+  }
+
+  const { error: deleteSessionsError } = await supabase.from('sessions').delete().in('venue_id', venueIds);
+  if (deleteSessionsError) throw deleteSessionsError;
+
+  const { error: deleteError } = await supabase.from('venues').delete().in('id', venueIds);
   if (deleteError) throw deleteError;
 
-  console.log(`Cleaned up ${existing.length} existing seed venue(s).`);
+  console.log(`Cleaned up ${existing.length} existing seed venue(s) and any sessions linked to them.`);
 }
 
 async function createVenues() {

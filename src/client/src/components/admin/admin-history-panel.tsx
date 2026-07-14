@@ -12,6 +12,7 @@ const ACTION_LABEL: Record<string, string> = {
   cancel: 'cancelled',
   advance_status: 'advanced status of',
   mark_attendance: 'marked attendance for',
+  remove_rsvp: 'removed a player from',
   create: 'created',
   adjust_rating: 'adjusted rating of',
 };

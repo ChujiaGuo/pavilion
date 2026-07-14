@@ -324,13 +324,19 @@ export async function getSessionRsvps(
   sessionId: string,
   requestingUserId?: string,
   organizerId?: string,
+  // Moderator+ admin view — bypasses the going/waitlisted-only filter (so
+  // cancelled/attended/no_show rows are visible too) and the private-profile
+  // name filter below, same as listSessions' adminOverride. The router only
+  // sets this after confirming requestingUserId is moderator+, so this
+  // function trusts it rather than re-checking role itself.
+  adminOverride = false,
 ): Promise<SessionRsvp[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('session_rsvps')
     .select('session_id, user_id, status, joined_at')
-    .eq('session_id', sessionId)
-    .in('status', ['going', 'waitlisted'])
-    .order('joined_at', { ascending: true });
+    .eq('session_id', sessionId);
+  if (!adminOverride) query = query.in('status', ['going', 'waitlisted']);
+  const { data, error } = await query.order('joined_at', { ascending: true });
 
   if (error || !data) return [];
   const rows = data as RsvpRow[];
@@ -357,7 +363,7 @@ export async function getSessionRsvps(
     (requestingUserId === organizerId || rows.some((row) => row.user_id === requestingUserId));
 
   return rows
-    .filter((row) => isParticipant || profileById.get(row.user_id)?.privacy_level !== 'private')
+    .filter((row) => adminOverride || isParticipant || profileById.get(row.user_id)?.privacy_level !== 'private')
     .map((row) => toRsvp(row, profileById.get(row.user_id)?.display_name ?? null));
 }
 
@@ -826,6 +832,47 @@ export async function cancelRsvp(userId: string, sessionId: string): Promise<Can
       }
     }
   }
+
+  return { ok: true };
+}
+
+export type RemoveRsvpResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'forbidden' | 'not_upcoming' | 'not_rsvped' };
+
+// Moderator+ removal of another player's RSVP — distinct from cancelRsvp
+// (self-service, any session status) in two ways: only allowed while the
+// session is still 'upcoming' (removing from an active/completed session
+// would silently rewrite attendance history), and it never applies the
+// late-cancel reliability penalty — that penalty represents the player's own
+// choice to bail late, not a moderator's decision to remove them.
+export async function removeRsvp(
+  sessionId: string,
+  targetUserId: string,
+  performedBy: string,
+): Promise<RemoveRsvpResult> {
+  const isModerator = roleAtLeast(await getAdminRole(performedBy), 'moderator');
+  if (!isModerator) return { ok: false, reason: 'forbidden' };
+
+  const { data: session, error: sessionError } = await supabase
+    .from('sessions')
+    .select('status')
+    .eq('id', sessionId)
+    .single();
+  if (sessionError || !session) return { ok: false, reason: 'not_found' };
+  if (session.status !== 'upcoming') return { ok: false, reason: 'not_upcoming' };
+
+  const { data: rpcResult, error: rpcError } = await supabase.rpc('cancel_rsvp_and_promote', {
+    p_session_id: sessionId,
+    p_user_id: targetUserId,
+  });
+  if (rpcError) return { ok: false, reason: 'not_found' };
+  if (rpcResult === 'not_rsvped') return { ok: false, reason: 'not_rsvped' };
+
+  await logSessionEdit(sessionId, performedBy, 'remove_rsvp', [
+    { field: 'removedUserId', before: targetUserId, after: null },
+    { field: 'rsvpStatus', before: rpcResult, after: 'cancelled' },
+  ]);
 
   return { ok: true };
 }

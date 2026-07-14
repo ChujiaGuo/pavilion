@@ -89,28 +89,28 @@ Migrations live in `supabase/migrations/` and are committed to git. `db push` on
 ## Seeding local test data
 
 ```bash
-npm run seed:sessions --workspace=server   # needs `supabase start` + src/server/.env.local, same as `dev`
+npm run seed:venues --workspace=server     # needs `supabase start` + src/server/.env.local, same as `dev`
 ```
 
-Creates a login-ready test account (`testuser123@example.com` / `password`) plus six supporting mock users, and nine mock sessions spanning the full skill-rating scale (including the documented floor/ceiling boundaries — see `technical-notes.md`'s "Rating System") with the test user as host on some, attendee/waitlisted/attended on others. Venue names are all prefixed `[SEED]` for easy identification. Safe to re-run — it deletes and recreates everything it owns (matched by its fixed list of emails) rather than accumulating duplicates. See `src/server/src/scripts/seed-sessions.ts` for the exact spread.
+Creates ten mock venues (all `[SEED]`-prefixed names, generic `Test Address N` street addresses) spanning every `type`/`surface_type`/`shuttle_type` value, a mix of drop-in/reservation-required and populated/null contact fields, and full `venue_hours` spreads (including a 24/7-ish club, a daylight-only outdoor court, and a single-court gym). Nine cluster around Rockville/Bethesda/Silver Spring/Wheaton/Germantown, MD; one sits in Fairfax, VA, well outside that cluster, for exercising the `nearby_venues` radius filter's exclusion side. Safe to re-run — it deletes and recreates everything it owns (matched by the `[SEED]` name prefix), which also deletes any `seed:sessions` sessions still pointing at those venues (re-run `seed:sessions` afterward). See `src/server/src/scripts/seed-venues.ts`.
 
 ```bash
-npm run seed:admins --workspace=server     # same prerequisites as seed:sessions
+npm run seed:sessions --workspace=server   # run seed:venues first — sessions link to its venues by id
 ```
 
-Creates one account per admin role for manually testing `/admin` (see `technical-notes.md`'s "Admin & Roles"): `testvenue@example.test` (`venue_verifier`), `testmod@example.test` (`moderator`), `testadmin@example.test` (`admin`), `testowner@example.test` (`owner`) — all password `password`. Safe to re-run, same delete-and-recreate pattern as `seed:sessions`. See `src/server/src/scripts/seed-admins.ts`.
+Creates a login-ready test account (`testuser123@example.com` / `password`) plus ten supporting mock users spanning every whole rating grade (1 through 10+), and seventeen mock sessions linked to the seeded venues: ten completed/past sessions covering the full skill-rating scale band-by-band (including the documented floor/ceiling boundaries and a beyond-10 exhibition — see `technical-notes.md`'s "Rating System"), plus seven upcoming/cancelled sessions for hosting, waitlist, and invite-only flows. The test user is host on some, attendee/waitlisted/attended/no-show on others. Safe to re-run — it deletes and recreates everything it owns (matched by its fixed list of emails) rather than accumulating duplicates. See `src/server/src/scripts/seed-sessions.ts` for the exact spread.
 
 ```bash
-npm run seed:venues --workspace=server     # same prerequisites as seed:sessions
+npm run seed:admins --workspace=server     # same prerequisites as seed:venues
 ```
 
-Creates seven mock venues (all `[SEED]`-prefixed names) spanning every `type`/`surface_type`/`shuttle_type` value, a mix of drop-in/reservation-required and populated/null contact fields, and full `venue_hours` spreads (including a 24/7-ish club and a daylight-only outdoor court). Six cluster around Rockville/Bethesda, MD to match `seed:sessions`' mock users; one sits in Fairfax, VA, well outside that cluster, for exercising the `nearby_venues` radius filter's exclusion side. Safe to re-run, same delete-and-recreate pattern as `seed:sessions` (matched by the `[SEED]` name prefix instead of emails). See `src/server/src/scripts/seed-venues.ts`.
+Creates one account per admin role for manually testing `/admin` (see `technical-notes.md`'s "Admin & Roles"): `testvenue@example.test` (`venue_verifier`), `testmod@example.test` (`moderator`), `testadmin@example.test` (`admin`), `testowner@example.test` (`owner`) — all password `password`. Safe to re-run, same delete-and-recreate pattern as the other seed scripts. Independent of venues/sessions. See `src/server/src/scripts/seed-admins.ts`.
 
 ```bash
-npm run seed:all --workspace=server        # runs seed:admins, then seed:sessions, then seed:venues
+npm run seed:all --workspace=server        # runs seed:venues, then seed:sessions, then seed:admins
 ```
 
-The three scripts don't reference each other's data (independent tables/emails), so this is just a convenience wrapper — equivalent to running all three individually in any order.
+Order matters here, unlike before: `seed:sessions`' sessions reference `seed:venues`' venues by id, so venues must exist first. `seed:admins` is independent and could run anywhere in the sequence.
 
 ## Testing
 
