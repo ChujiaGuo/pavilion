@@ -761,7 +761,7 @@ async function main() {
 
   console.log('\nDone.');
   console.log(`Log in as the test user at http://localhost:3000/login`);
-  console.log(`  Email:    testuser123@example.com`);
+  console.log(`  Email:    ${USERS.find((u) => u.key === 'testUser')!.email}`);
   console.log(`  Password: ${TEST_USER_PASSWORD}`);
   console.log(
     `\n${SESSIONS.length} sessions seeded (${pastCount} past/completed), ${USERS.length} users seeded, linked to ${Object.keys(venueIdByName).length} seeded venues.`,

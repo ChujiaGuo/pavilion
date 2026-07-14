@@ -1,6 +1,6 @@
 # Technical Notes
 
-_Last updated: 2026-07-14 (reordered session status so `completed` is last and merged attendance-marking into `voting` as its first step, rather than a gate before it — see "Core Algorithms" → "Session Status Lifecycle"; added KI-008)_
+_Last updated: 2026-07-14 (reordered session status so `completed` is last and merged attendance-marking into `voting` as its first step, rather than a gate before it — see "Core Algorithms" → "Session Status Lifecycle"; added KI-008; `GET /:id/rsvps` now includes `attended` rows in the non-admin roster so it doesn't collapse to empty once attendance is marked)_
 
 See `brainstorm.md` for product/idea context, `misc-tech-notes.md` for one-time decisions/historical notes/implementation footnotes, `database-schema.md` for full table definitions.
 
@@ -112,7 +112,7 @@ All routes mounted under `/api/<domain>`. **Auth** `yes` = Bearer token required
 | `GET` | `/` | no (moderator+ for `admin=true`) | List/search sessions; `public`-only unless the caller owns the session or passes an exact `id`; `admin=true` bypasses all visibility rules, capped 50 rows |
 | `GET` | `/:id` | conditional | Get session + `organizerName`; `invite_only` requires a valid Bearer token |
 | `GET` | `/:id/rsvp` | yes | Caller's own RSVP status |
-| `GET` | `/:id/rsvps` | conditional (moderator+ for `admin=true`) | List active RSVPs with `displayName`; names visible to shared participants regardless of privacy, else `public`-only; `admin=true` returns every RSVP status (including `cancelled`/`attended`/`no_show`) and every name regardless of privacy |
+| `GET` | `/:id/rsvps` | conditional (moderator+ for `admin=true`) | List `going`/`waitlisted`/`attended` RSVPs with `displayName` (excludes `no_show`/`cancelled`); names visible to shared participants regardless of privacy, else `public`-only; `admin=true` returns every RSVP status (including `cancelled`/`no_show`) and every name regardless of privacy |
 | `PATCH` | `/:id` | yes (organizer/moderator+) | Update fields; re-validates the skill-range invariant even on a single-bound patch |
 | `PATCH` | `/:id/status` | yes (organizer/moderator+) | Advance `upcoming → active → voting`; 409 on invalid transitions (including any attempt to leave `voting` — no exit yet) |
 | `POST` | `/` | yes | Create session; skill range validated against the `numeric(4,2)` column ceiling; returns `warning: "skill_range_wide"` if organizer grade is far from the range |

@@ -1486,6 +1486,18 @@ describe('getSessionRsvps', () => {
     expect(await getSessionRsvps(SESSION_ID)).toEqual([]);
   });
 
+  it('includes attended rows in the non-admin roster, but not no_show/cancelled', async () => {
+    const rsvpChain = arrayChain([
+      { session_id: SESSION_ID, user_id: USER_ID, status: 'attended', joined_at: '2030-01-05T00:00:00Z' },
+    ]);
+    const profileChain = arrayChain([{ id: USER_ID, display_name: 'Attended Player', privacy_level: 'public' }]);
+    mockFrom.mockReturnValueOnce(rsvpChain as any).mockReturnValueOnce(profileChain as any);
+
+    const rsvps = await getSessionRsvps(SESSION_ID);
+    expect(rsvpChain['in']).toHaveBeenCalledWith('status', ['going', 'waitlisted', 'attended']);
+    expect(rsvps).toEqual([expect.objectContaining({ userId: USER_ID, status: 'attended' })]);
+  });
+
   it('excludes RSVPs belonging to private-profile users', async () => {
     const rows = [
       { session_id: SESSION_ID, user_id: USER_ID, status: 'going', joined_at: '2030-01-05T00:00:00Z' },

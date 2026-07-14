@@ -131,7 +131,15 @@ export default function SessionDetailPage() {
   if (!auth) return null;
 
   const isOrganizer = session != null && session.organizerId === auth.userId;
+  // Strictly 'going' — used by the attendance checklist below, which needs
+  // to tell "not yet marked" (going is non-empty) apart from "already
+  // marked" (going is empty once markAttendance flips everyone over).
   const going = rsvps.filter((r) => r.status === 'going');
+  // For the roster display at the top of the page: 'going' before
+  // attendance is marked, 'attended' after — otherwise that list (and its
+  // count) would collapse to empty the moment attendance gets recorded,
+  // even though the session clearly had people in it.
+  const confirmedAttendees = rsvps.filter((r) => r.status === 'going' || r.status === 'attended');
   const waitlisted = rsvps
     .filter((r) => r.status === 'waitlisted')
     .sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime());
@@ -394,11 +402,11 @@ export default function SessionDetailPage() {
 
       <section className="mt-10 max-w-md">
         <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-neutral-500">
-          Going ({going.length}/{session.maxPlayers})
+          Going ({confirmedAttendees.length}/{session.maxPlayers})
         </h2>
-        {going.length > 0 ? (
+        {confirmedAttendees.length > 0 ? (
           <ul className="mt-2 space-y-1 text-neutral-900">
-            {going.map((r) => (
+            {confirmedAttendees.map((r) => (
               <li key={r.userId}>{r.displayName ?? 'A Pavilion user'}</li>
             ))}
           </ul>

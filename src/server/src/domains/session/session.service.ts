@@ -324,18 +324,22 @@ export async function getSessionRsvps(
   sessionId: string,
   requestingUserId?: string,
   organizerId?: string,
-  // Moderator+ admin view — bypasses the going/waitlisted-only filter (so
-  // cancelled/attended/no_show rows are visible too) and the private-profile
-  // name filter below, same as listSessions' adminOverride. The router only
-  // sets this after confirming requestingUserId is moderator+, so this
-  // function trusts it rather than re-checking role itself.
+  // Moderator+ admin view — bypasses the going/waitlisted/attended-only filter
+  // (so cancelled/no_show rows are visible too) and the private-profile name
+  // filter below, same as listSessions' adminOverride. The router only sets
+  // this after confirming requestingUserId is moderator+, so this function
+  // trusts it rather than re-checking role itself.
   adminOverride = false,
 ): Promise<SessionRsvp[]> {
   let query = supabase
     .from('session_rsvps')
     .select('session_id, user_id, status, joined_at')
     .eq('session_id', sessionId);
-  if (!adminOverride) query = query.in('status', ['going', 'waitlisted']);
+  // 'attended' is included alongside the active statuses so the roster
+  // doesn't collapse to empty once markAttendance flips 'going' rows over —
+  // a session in the voting stage still needs to show who was there.
+  // 'no_show'/'cancelled' stay excluded from the non-admin view.
+  if (!adminOverride) query = query.in('status', ['going', 'waitlisted', 'attended']);
   const { data, error } = await query.order('joined_at', { ascending: true });
 
   if (error || !data) return [];
